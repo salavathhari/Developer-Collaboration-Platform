@@ -7,12 +7,25 @@ const { createNotification, emitNotification } = require("../utils/notify");
 
 const getTasks = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
-  const tasks = await Task.find({ projectId })
+  const limit = Math.min(Number(req.query.limit || 200), 500);
+  const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
+
+  const query = { projectId };
+  if (cursor) {
+    query.createdAt = { $lt: cursor };
+  }
+
+  const tasks = await Task.find(query)
     .sort({ createdAt: -1 })
+    .limit(limit)
     .populate("assignees", "name email avatar")
     .populate("createdBy", "name email avatar");
 
-  return res.status(200).json({ tasks });
+  const nextCursor = tasks.length
+    ? tasks[tasks.length - 1].createdAt
+    : null;
+
+  return res.status(200).json({ tasks, nextCursor });
 });
 
 const createTask = asyncHandler(async (req, res) => {

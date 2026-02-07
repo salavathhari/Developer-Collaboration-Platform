@@ -26,3 +26,10 @@ export const getSignedUrl = async (
   );
   return response.data;
 };
+
+export const getFiles = async (projectId: string) => {
+  const response = await api.get<{ files: FileAsset[] }>(
+    `/api/projects/${projectId}/files`
+  );
+  return response.data.files;
+};

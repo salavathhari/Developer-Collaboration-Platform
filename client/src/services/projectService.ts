@@ -38,3 +38,10 @@ export const acceptInvite = async (token: string) => {
   );
   return response.data.project;
 };
+
+export const deleteProject = async (projectId: string) => {
+  const response = await api.delete<{ success: boolean; projectId: string }>(
+    `/api/projects/${projectId}`
+  );
+  return response.data;
+};

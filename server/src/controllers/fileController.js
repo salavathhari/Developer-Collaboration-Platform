@@ -73,7 +73,17 @@ const getSignedUrl = asyncHandler(async (req, res) => {
   return res.status(200).json({ url, key });
 });
 
+const getFiles = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const files = await FileAsset.find({ projectId })
+    .sort({ createdAt: -1 })
+    .populate("uploaderId", "name email avatar");
+
+  return res.status(200).json({ files });
+});
+
 module.exports = {
   uploadFile,
   getSignedUrl,
+  getFiles,
 };

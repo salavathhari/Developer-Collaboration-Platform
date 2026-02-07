@@ -35,16 +35,39 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    const hasSession = localStorage.getItem("hasSession"); // Check if we expect a session
 
-    refreshProfile().finally(() => setLoading(false));
+    const bootstrap = async () => {
+      // If no token and no session flag, we are likely a guest. Don't try to refresh.
+      if (!token && !hasSession) {
+        setLoading(false);
+        return;
+      }
+
+      if (!token) {
+        try {
+          const refresh = await authService.refreshAccessToken();
+          localStorage.setItem("token", refresh.token);
+          await refreshProfile();
+        } catch {
+          setUser(null);
+          // If refresh fails, clear the session flag so we don't try again until login
+          localStorage.removeItem("hasSession");
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+
+      refreshProfile().finally(() => setLoading(false));
+    };
+
+    bootstrap();
   }, [refreshProfile]);
 
   const handleAuthSuccess = (data: authService.AuthResponse) => {
     localStorage.setItem("token", data.token);
+    localStorage.setItem("hasSession", "true"); // Set session flag
     setUser(data.user);
   };
 
@@ -59,6 +82,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const logout = useCallback(() => {
     localStorage.removeItem("token");
+    localStorage.removeItem("hasSession"); // Clear session flag
+    authService.logout().catch(() => undefined);
     setUser(null);
   }, []);
 

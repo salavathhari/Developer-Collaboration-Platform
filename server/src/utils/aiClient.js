@@ -2,13 +2,13 @@ const ApiError = require("../utils/ApiError");
 
 const callAi = async ({ prompt, provider }) => {
   const apiKey = process.env.AI_API_KEY;
-  if (!apiKey) {
-    throw new ApiError(500, "AI_API_KEY is not set");
-  }
 
   const model = process.env.AI_MODEL || "gpt-4o-mini";
 
   if (provider === "openai") {
+    if (!apiKey) {
+      throw new ApiError(500, "AI_API_KEY is not set");
+    }
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -32,6 +32,9 @@ const callAi = async ({ prompt, provider }) => {
   }
 
   if (provider === "gemini") {
+    if (!apiKey) {
+      throw new ApiError(500, "AI_API_KEY is not set");
+    }
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {

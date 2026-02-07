@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const cookieParser = require("cookie-parser");
 
 const healthRoutes = require("./routes/health");
 const authRoutes = require("./routes/auth");
@@ -16,6 +17,7 @@ const activityRoutes = require("./routes/activity");
 const aiRoutes = require("./routes/ai");
 const summaryRoutes = require("./routes/summaries");
 const insightRoutes = require("./routes/insights");
+const { requestLogger } = require("./middleware/requestLogger");
 const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
 
 const app = express();
@@ -36,6 +38,8 @@ app.use(
 		credentials: true,
 	})
 );
+app.use(requestLogger);
+app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 

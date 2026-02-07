@@ -3,6 +3,7 @@ const ChatSummary = require("../models/ChatSummary");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
 const { callAi } = require("../utils/aiClient");
+const logger = require("../utils/logger");
 
 const summarizeChat = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
@@ -30,13 +31,21 @@ const summarizeChat = asyncHandler(async (req, res) => {
 
   const instruction =
     "Summarize the following project chat. Provide bullet points, key decisions, blockers, and next steps.";
-  const responseText = await callAi({
-    prompt: `${instruction}\n\n${prompt}`,
-    provider,
-  });
+  let responseText = "";
+  let fallback = false;
+  try {
+    responseText = await callAi({
+      prompt: `${instruction}\n\n${prompt}`,
+      provider,
+    });
+  } catch (error) {
+    fallback = true;
+    logger.error({ message: error.message, provider }, "AI summary failure");
+    responseText = "AI summary unavailable. Please retry in a few minutes.";
+  }
 
   let summaryRecord = null;
-  if (store) {
+  if (store && !fallback) {
     summaryRecord = await ChatSummary.create({
       projectId,
       createdBy: req.user.id,
@@ -50,6 +59,7 @@ const summarizeChat = asyncHandler(async (req, res) => {
   return res.status(200).json({
     summary: responseText,
     summaryId: summaryRecord ? summaryRecord.id : null,
+    fallback,
   });
 });
 

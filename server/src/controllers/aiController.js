@@ -3,6 +3,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const { sanitizeString } = require("../utils/sanitize");
 const { callAi } = require("../utils/aiClient");
 const ApiError = require("../utils/ApiError");
+const logger = require("../utils/logger");
 
 const askAi = asyncHandler(async (req, res) => {
   const prompt = sanitizeString(req.body.prompt || "");
@@ -14,7 +15,15 @@ const askAi = asyncHandler(async (req, res) => {
   }
 
   const start = Date.now();
-  const responseText = await callAi({ prompt, provider });
+  let responseText = "";
+  let failed = false;
+  try {
+    responseText = await callAi({ prompt, provider });
+  } catch (error) {
+    failed = true;
+    logger.error({ message: error.message, provider }, "AI provider failure");
+    responseText = "AI temporarily unavailable. Please try again shortly.";
+  }
   const latencyMs = Date.now() - start;
 
   const log = await AiLog.create({
@@ -29,6 +38,7 @@ const askAi = asyncHandler(async (req, res) => {
   return res.status(200).json({
     response: responseText,
     logId: log.id,
+    fallback: failed,
   });
 });
 

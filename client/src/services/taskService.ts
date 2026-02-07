@@ -29,11 +29,12 @@ export const updateTask = async (
 };
 
 export const deleteTask = async (projectId: string, taskId: string) => {
-  const response = await api.delete<{ success: boolean }>(
+  const response = await api.delete<{ success: true }>(
     `/api/projects/${projectId}/tasks/${taskId}`
   );
-  return response.data.success;
+  return response.data;
 };
+
 
 export const addComment = async (
   projectId: string,

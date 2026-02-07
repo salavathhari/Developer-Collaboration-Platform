@@ -15,12 +15,14 @@ const {
   createInviteLink,
   acceptInvite,
   updateMemberRole,
+  deleteProject,
 } = require("../controllers/projectController");
 
 const router = express.Router();
 
 router.get("/", authenticate, getMyProjects);
 router.post("/", authenticate, validateProjectCreate, createProject);
+router.delete("/:projectId", authenticate, requireProjectOwner, deleteProject);
 router.post(
   "/:projectId/invite",
   authenticate,

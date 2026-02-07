@@ -7,6 +7,11 @@ export type AuthResponse = {
   user: User;
 };
 
+export type RefreshResponse = {
+  token: string;
+  expiresIn: string;
+};
+
 export type LoginPayload = {
   email: string;
   password: string;
@@ -32,6 +37,15 @@ export const login = async (payload: LoginPayload) => {
 export const register = async (payload: SignupPayload) => {
   const response = await api.post<AuthResponse>("/api/auth/register", payload);
   return response.data;
+};
+
+export const refreshAccessToken = async () => {
+  const response = await api.post<RefreshResponse>("/api/auth/refresh", {});
+  return response.data;
+};
+
+export const logout = async () => {
+  await api.post("/api/auth/logout", {});
 };
 
 export const getProfile = async () => {

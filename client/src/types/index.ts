@@ -25,6 +25,8 @@ export type Project = {
 
 export type FileAsset = {
   _id: string;
+  projectId: string;
+  uploaderId?: User;
   filename: string;
   url: string;
   size: number;

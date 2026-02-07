@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
+import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
@@ -41,12 +42,10 @@ const AuthLayout = ({ children }: { children: ReactNode }) => (
 );
 
 const ProtectedLayout = ({ children }: { children: ReactNode }) => (
-  <div className="app-shell">
-    <Sidebar />
-    <div className="app-body">
-      <TopBar />
-      <main className="app-main">{children}</main>
-    </div>
+  <div className="flex flex-col min-h-screen bg-[#050505]">
+    {/* <Sidebar />  Temporarily hidden to match requested design */}
+    <TopBar />
+    <main className="flex-1 overflow-auto">{children}</main>
   </div>
 );
 
@@ -67,22 +66,14 @@ const ProtectedRoute = ({ children }: { children: ReactNode }) => {
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/" element={<Landing />} />
       <Route
         path="/login"
-        element={
-          <AuthLayout>
-            <Login />
-          </AuthLayout>
-        }
+        element={<Login />}
       />
       <Route
         path="/signup"
-        element={
-          <AuthLayout>
-            <Signup />
-          </AuthLayout>
-        }
+        element={<Signup />}
       />
       <Route path="/invite/:token" element={<InviteAccept />} />
       <Route

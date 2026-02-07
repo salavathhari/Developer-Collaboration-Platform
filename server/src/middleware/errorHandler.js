@@ -1,4 +1,5 @@
 const ApiError = require("../utils/ApiError");
+const logger = require("../utils/logger");
 
 const errorHandler = (err, req, res, next) => {
   if (res.headersSent) {
@@ -16,6 +17,12 @@ const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const message = err.message || "Internal server error";
   const errors = err.errors || undefined;
+
+  logger.error({
+    message,
+    statusCode,
+    stack: err.stack,
+  });
 
   return res.status(statusCode).json({ message, errors });
 };

@@ -6,6 +6,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const { createInviteToken, hashToken } = require("../utils/token");
 const { createNotification, emitNotification } = require("../utils/notify");
 const { logActivity } = require("../utils/activity");
+const { sendEmail } = require("../utils/email");
 
 const inviteTtlMs = Number(process.env.INVITE_TOKEN_TTL_MS || 1000 * 60 * 60 * 24 * 7);
 
@@ -89,6 +90,27 @@ const inviteMember = asyncHandler(async (req, res) => {
 
   const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
   const inviteLink = `${clientUrl}/invite/${token}`;
+
+  try {
+    const inviterName = req.user.name || req.user.email;
+    await sendEmail({
+      to: normalizedEmail,
+      subject: `${inviterName} invited you to join ${project.name} on DevCollab`,
+      html: `
+        <div style="font-family: monospace; background-color: #050505; color: #ffffff; padding: 40px; border-radius: 8px;">
+          <h2 style="color: #6366f1;">Join ${project.name}</h2>
+          <p>You have been invited by <strong>${inviterName}</strong> to collaborate on <strong>${project.name}</strong>.</p>
+          <div style="margin: 30px 0;">
+            <a href="${inviteLink}" style="background-color: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Accept Invitation</a>
+          </div>
+          <p style="color: #6b7280; font-size: 12px;">This link will expire in 7 days.</p>
+          <p style="color: #6b7280; font-size: 12px;">If you can't click the button, copy and paste this link:<br>${inviteLink}</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    console.error("Failed to send invite email", err);
+  }
 
   return res.status(201).json({ inviteLink, expiresAt });
 });
@@ -202,6 +224,23 @@ const updateMemberRole = asyncHandler(async (req, res) => {
   return res.status(200).json({ project });
 });
 
+const deleteProject = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const project = await Project.findById(projectId);
+
+  if (!project) {
+    throw new ApiError(404, "Project not found");
+  }
+
+  if (String(project.owner) !== req.user.id) {
+    throw new ApiError(403, "Only the owner can delete the project");
+  }
+
+  await Project.deleteOne({ _id: projectId });
+
+  return res.status(200).json({ success: true, projectId });
+});
+
 module.exports = {
   createProject,
   getMyProjects,
@@ -209,4 +248,5 @@ module.exports = {
   createInviteLink,
   acceptInvite,
   updateMemberRole,
+  deleteProject,
 };
