@@ -1,25 +1,24 @@
 import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import api from "../lib/api";
+
+import { Link, useNavigate } from "react-router-dom";
+
+import { useAuth } from "../hooks/useAuth";
+import { acceptInvite } from "../services/projectService";
 
 const isValidEmail = (email: string) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
 
-type LoginPayload = {
-  email: string;
-  password: string;
-};
-
-type LoginProps = {
-  onSuccess: () => void;
-};
-
-const Login = ({ onSuccess }: LoginProps) => {
-  const [form, setForm] = useState<LoginPayload>({ email: "", password: "" });
+const Login = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
@@ -41,6 +40,7 @@ const Login = ({ onSuccess }: LoginProps) => {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSuccess(null);
 
     const validationError = validate();
     if (validationError) {
@@ -50,16 +50,27 @@ const Login = ({ onSuccess }: LoginProps) => {
 
     try {
       setLoading(true);
-      const response = await api.post("/api/auth/login", form);
-      const { token } = response.data;
+      await login(form);
 
-      if (token) {
-        localStorage.setItem("token", token);
-        onSuccess();
+      const pendingInvite = localStorage.getItem("pendingInviteToken");
+      if (pendingInvite) {
+        try {
+          await acceptInvite(pendingInvite);
+          localStorage.removeItem("pendingInviteToken");
+        } catch {
+          localStorage.removeItem("pendingInviteToken");
+        }
       }
+
+      setSuccess("Signed in. Redirecting...");
+      setTimeout(() => navigate("/dashboard"), 600);
     } catch (err: any) {
-      const message = err?.response?.data?.message || "Login failed.";
-      setError(message);
+      if (err?.response?.status === 401) {
+        setError("Invalid email or password.");
+      } else {
+        const message = err?.response?.data?.message || "Login failed.";
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -72,6 +83,7 @@ const Login = ({ onSuccess }: LoginProps) => {
         <p>Sign in to keep building with your team.</p>
       </div>
 
+      {success ? <div className="form-alert success">{success}</div> : null}
       {error ? <div className="form-alert error">{error}</div> : null}
 
       <label className="field">
@@ -90,16 +102,25 @@ const Login = ({ onSuccess }: LoginProps) => {
 
       <label className="field">
         <span>Password</span>
-        <input
-          className="input"
-          type="password"
-          name="password"
-          value={form.password}
-          onChange={handleChange}
-          placeholder="••••••••"
-          autoComplete="current-password"
-          required
-        />
+        <div className="input-row">
+          <input
+            className="input"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            value={form.password}
+            onChange={handleChange}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            required
+          />
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setShowPassword((prev) => !prev)}
+          >
+            {showPassword ? "Hide" : "Show"}
+          </button>
+        </div>
       </label>
 
       <button className="primary-button" type="submit" disabled={loading}>
@@ -107,7 +128,7 @@ const Login = ({ onSuccess }: LoginProps) => {
       </button>
 
       <p className="form-footer">
-        Use the email you registered with. We never share your data.
+        Need an account? <Link to="/signup">Create one</Link>.
       </p>
     </form>
   );

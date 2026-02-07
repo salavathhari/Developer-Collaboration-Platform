@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema(
       trim: true,
       match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     },
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: 280,
+      default: "",
+    },
     password: {
       type: String,
       required: true,
@@ -27,6 +33,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: null,
+    },
+    role: {
+      type: String,
+      enum: ["owner", "member"],
+      default: "member",
     },
   },
   { timestamps: true }
