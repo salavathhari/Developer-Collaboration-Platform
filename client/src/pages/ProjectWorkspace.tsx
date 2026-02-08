@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
 import { getProjects } from "../services/projectService";
-import type { FileAsset, Project, User } from "../types";
+import type { Project } from "../types";
 import ChatRoom from "../components/ChatRoom";
 import TaskBoard from "../components/TaskBoard";
 import FilesView from "../components/FilesView";
 import AnalyticsView from "../components/AnalyticsView";
 import AiAssistant from "../components/AiAssistant";
 import ProjectSettings from "../components/ProjectSettings";
+import PRList from "../components/PRList";
+import PRDetail from "../components/PRDetail";
 import { useSocket } from "../hooks/useSocket";
+import { useVideo } from "../context/VideoContext";
 
 const ProjectWorkspace = () => {
   const { projectId } = useParams();
@@ -17,18 +20,19 @@ const ProjectWorkspace = () => {
   const [project, setProject] = useState<Project | null>(null);
   const [online, setOnline] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "chat" | "tasks" | "files" | "analytics" | "ai" | "settings"
+    "chat" | "tasks" | "files" | "analytics" | "ai" | "settings" | "prs"
   >("chat");
-  const [files, setFiles] = useState<FileAsset[]>([]);
+  const [selectedPR, setSelectedPR] = useState<string | null>(null);
   const token = localStorage.getItem("token");
   const socket = useSocket(token);
+  const { startCall, joinCall, activeProjectCalls } = useVideo();
 
   useEffect(() => {
     const loadProject = async () => {
       try {
         const projects = await getProjects();
         // Fallback for demo if ID doesn't match db
-        const selected = projects.find((item) => item._id === projectId || item.id === projectId) || projects[0];
+        const selected = projects.find((item) => item._id === projectId) || projects[0];
         setProject(selected);
       } catch (err) {
         console.error(err);
@@ -84,6 +88,9 @@ const ProjectWorkspace = () => {
     { id: 'tasks', label: 'Tasks', icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
     )},
+    { id: 'prs', label: 'Pull Requests', icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+    )},
     { id: 'files', label: 'Files', icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
     )},
@@ -115,8 +122,35 @@ const ProjectWorkspace = () => {
             <div className="flex flex-col">
                 <h1 className="text-xl font-bold font-mono tracking-wide flex items-center gap-2">
                     {project.name}
+                    {Array.isArray(online) && online.length > 0 && (
+                        <span className="text-[10px] items-center gap-1 bg-green-500/10 text-green-400 px-2 py-0.5 rounded-full border border-green-500/20 hidden md:flex">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                            {online.length} Online
+                        </span>
+                    )}
                 </h1>
                 <p className="text-xs text-gray-500 font-medium">{project.description || "No description provided"}</p>
+            </div>
+
+             {/* Video Call Widget */}
+             <div className="ml-4 border-l border-white/10 pl-4">
+               {activeProjectCalls[projectId!] ? (
+                   <button 
+                      onClick={() => joinCall(projectId!)}
+                      className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm font-medium animate-pulse shadow-lg shadow-green-900/50"
+                   >
+                      <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
+                      Join Call
+                   </button>
+               ) : (
+                   <button 
+                      onClick={() => startCall(projectId!)}
+                      className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded text-sm transition-colors border border-gray-700 hover:border-indigo-500"
+                   >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                      Start Call
+                   </button>
+               )}
             </div>
         </div>
 
@@ -146,8 +180,11 @@ const ProjectWorkspace = () => {
          ))}
       </div>
 
-      {/* Content Area */}
-      <main className="flex-1 overflow-hidden relative bg-[#050505]">
+      {/* Content Area */}        {activeTab === 'prs' && (
+           selectedPR ? 
+            <PRDetail project={project} prId={selectedPR} onBack={() => setSelectedPR(null)} /> : 
+            <PRList project={project} onSelect={setSelectedPR} />
+        )}      <main className="flex-1 overflow-hidden relative bg-[#050505]">
           {activeTab === 'chat' && <ChatRoom project={project} />}
           {activeTab === 'tasks' && <TaskBoard project={project} />}
           {activeTab === 'files' && <FilesView project={project} />}

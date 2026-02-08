@@ -8,7 +8,7 @@ export const getTasks = async (projectId: string) => {
   return response.data.tasks;
 };
 
-export const createTask = async (projectId: string, payload: Partial<Task>) => {
+export const createTask = async (projectId: string, payload: any) => {
   const response = await api.post<{ task: Task }>(
     `/api/projects/${projectId}/tasks`,
     payload
@@ -19,7 +19,7 @@ export const createTask = async (projectId: string, payload: Partial<Task>) => {
 export const updateTask = async (
   projectId: string,
   taskId: string,
-  payload: Partial<Task>
+  payload: any
 ) => {
   const response = await api.patch<{ task: Task }>(
     `/api/projects/${projectId}/tasks/${taskId}`,
@@ -35,7 +35,6 @@ export const deleteTask = async (projectId: string, taskId: string) => {
   return response.data;
 };
 
-
 export const addComment = async (
   projectId: string,
   taskId: string,
@@ -46,4 +45,12 @@ export const addComment = async (
     { content }
   );
   return response.data.task;
+};
+
+export const reorderTasks = async (projectId: string, tasks: any[]) => {
+  const response = await api.post(
+    `/api/projects/${projectId}/tasks/reorder`,
+    { tasks }
+  );
+  return response.data;
 };

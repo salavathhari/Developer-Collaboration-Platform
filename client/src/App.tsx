@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useAuth } from "./hooks/useAuth";
-import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -16,30 +15,6 @@ import TasksHub from "./pages/TasksHub";
 import FilesHub from "./pages/FilesHub";
 import NotificationsHub from "./pages/NotificationsHub";
 import "./App.css";
-
-const AuthLayout = ({ children }: { children: ReactNode }) => (
-  <div className="auth-shell">
-    <div className="brand-panel">
-      <div className="brand-chip">DevCollab</div>
-      <h1>Build together. Ship faster.</h1>
-      <p>
-        A focused workspace for modern engineering teams, pairing code, design,
-        and releases into one flow.
-      </p>
-      <div className="brand-stats">
-        <div>
-          <span>99.98%</span>
-          <small>service uptime</small>
-        </div>
-        <div>
-          <span>24/7</span>
-          <small>collaboration</small>
-        </div>
-      </div>
-    </div>
-    <div className="auth-card">{children}</div>
-  </div>
-);
 
 const ProtectedLayout = ({ children }: { children: ReactNode }) => (
   <div className="flex flex-col min-h-screen bg-[#050505]">

@@ -17,6 +17,9 @@ const activityRoutes = require("./routes/activity");
 const aiRoutes = require("./routes/ai");
 const summaryRoutes = require("./routes/summaries");
 const insightRoutes = require("./routes/insights");
+const columnRoutes = require("./routes/columns");
+const prRoutes = require("./routes/pullRequests");
+const meetingRoutes = require("./routes/meetingRoutes");
 const { requestLogger } = require("./middleware/requestLogger");
 const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
 
@@ -56,6 +59,9 @@ app.use("/api/projects/:projectId/files", fileRoutes);
 app.use("/api/projects/:projectId/activity", activityRoutes);
 app.use("/api/projects/:projectId/summaries", summaryRoutes);
 app.use("/api/projects/:projectId/insights", insightRoutes);
+app.use("/api/columns", columnRoutes);
+app.use("/api/pull-requests", prRoutes);
+app.use("/api/meetings", meetingRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/ai", aiRoutes);
 

@@ -29,8 +29,21 @@ export const useSocket = (token: string | null) => {
 
     socketInstance = io(getSocketUrl(), {
       auth: { token },
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
     });
+
+    socketInstance.on("connect", () => {
+      console.log("Socket.io: Connected successfully", socketInstance?.id);
+    });
+
+    socketInstance.on("connect_error", (err) => {
+      console.error("Socket.io: Connection error:", err.message);
+    });
+
+    socketInstance.on("disconnect", (reason) => {
+      console.log("Socket.io: Disconnected:", reason);
+    });
+
     socketToken = token;
     return socketInstance;
   }, [token]);

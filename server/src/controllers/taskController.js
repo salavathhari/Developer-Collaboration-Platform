@@ -16,10 +16,11 @@ const getTasks = asyncHandler(async (req, res) => {
   }
 
   const tasks = await Task.find(query)
-    .sort({ createdAt: -1 })
+    .sort({ order: 1, createdAt: -1 })
     .limit(limit)
     .populate("assignees", "name email avatar")
-    .populate("createdBy", "name email avatar");
+    .populate("createdBy", "name email avatar")
+    .populate("columnId");
 
   const nextCursor = tasks.length
     ? tasks[tasks.length - 1].createdAt
@@ -43,6 +44,9 @@ const createTask = asyncHandler(async (req, res) => {
     title,
     description,
     status,
+    columnId: req.body.columnId,
+    order: req.body.order,
+    type: req.body.type || "task",
     assignees: req.body.assignees || [],
     labels: req.body.labels || [],
     dueDate: req.body.dueDate || null,
@@ -63,6 +67,33 @@ const createTask = asyncHandler(async (req, res) => {
   });
 
   return res.status(201).json({ task });
+});
+
+const reorderTasks = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { tasks } = req.body; 
+
+  if (!Array.isArray(tasks)) {
+    throw new ApiError(400, "Invalid tasks array");
+  }
+
+  const operations = tasks.map((t) => ({
+    updateOne: {
+      filter: { _id: t._id, projectId },
+      update: { $set: { order: t.order, columnId: t.columnId, status: t.status } },
+    },
+  }));
+
+  if (operations.length > 0) {
+    await Task.bulkWrite(operations);
+  }
+  
+  const io = req.app.get("io");
+  if (io) {
+    io.to(projectId).emit("tasks_reordered", { tasks });
+  }
+
+  return res.status(200).json({ success: true });
 });
 
 const updateTask = asyncHandler(async (req, res) => {
@@ -93,6 +124,10 @@ const updateTask = asyncHandler(async (req, res) => {
   if (req.body.priority) {
     updates.priority = req.body.priority;
   }
+
+  if (req.body.columnId !== undefined) updates.columnId = req.body.columnId;
+  if (req.body.order !== undefined) updates.order = req.body.order;
+  if (req.body.type) updates.type = req.body.type;
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, projectId },
@@ -222,4 +257,5 @@ module.exports = {
   assignUser,
   unassignUser,
   addComment,
+  reorderTasks,
 };

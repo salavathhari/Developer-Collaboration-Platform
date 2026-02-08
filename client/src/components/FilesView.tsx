@@ -11,7 +11,7 @@ const FilesView = ({ project }: { project: Project }) => {
   
   const token = localStorage.getItem("token");
   const socket = useSocket(token);
-  const projectId = project._id || project.id;
+  const projectId = project._id;
 
   useEffect(() => {
     const load = async () => {

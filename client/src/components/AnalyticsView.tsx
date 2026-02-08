@@ -6,7 +6,7 @@ const AnalyticsView = ({ project }: { project: Project }) => {
   const [insight, setInsight] = useState<ProjectInsight | null>(null);
   const [loading, setLoading] = useState(false);
   
-  const projectId = project._id || project.id;
+  const projectId = project._id;
   
   const membersCount = useMemo(() => {
     // Count unique members + owner

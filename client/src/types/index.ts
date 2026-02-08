@@ -16,6 +16,7 @@ export type ProjectMember = {
 
 export type Project = {
   _id: string;
+  id?: string;
   name: string;
   description?: string;
   owner: User;
@@ -25,6 +26,7 @@ export type Project = {
 
 export type FileAsset = {
   _id: string;
+  id?: string;
   projectId: string;
   uploaderId?: User;
   filename: string;
@@ -46,6 +48,30 @@ export type Message = {
 };
 
 export type Task = {
+  _id: string;
+  projectId: string;
+  title: string;
+  description?: string;
+  status: "todo" | "in_progress" | "review" | "done";
+  columnId?: string;
+  order?: number;
+  type?: "task" | "bug" | "feature";
+  priority?: "low" | "medium" | "high";
+  dueDate?: string;
+  assignees: User[];
+  labels: string[];
+  createdBy: User;
+  comments: { authorId: string; content: string; createdAt: string }[];
+  createdAt: string;
+};
+
+export type Column = {
+  _id: string;
+  name: string;
+  projectId: string;
+  order: number;
+};
+
   _id: string;
   projectId: string;
   title: string;

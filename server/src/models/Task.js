@@ -46,6 +46,19 @@ const taskSchema = new mongoose.Schema(
       enum: ["todo", "in_progress", "review", "done"],
       default: "todo",
     },
+    columnId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Column",
+    },
+    order: {
+      type: Number,
+      default: 0,
+    },
+    type: {
+      type: String,
+      enum: ["task", "bug", "feature"],
+      default: "task",
+    },
     assignees: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -10,10 +10,12 @@ const {
   assignUser,
   unassignUser,
   addComment,
+  reorderTasks,
 } = require("../controllers/taskController");
 
 const router = express.Router({ mergeParams: true });
 
+router.post("/reorder", authenticate, requireProjectMember, reorderTasks);
 router.get("/", authenticate, requireProjectMember, getTasks);
 router.post("/", authenticate, requireProjectMember, createTask);
 router.patch("/:taskId", authenticate, requireProjectMember, updateTask);

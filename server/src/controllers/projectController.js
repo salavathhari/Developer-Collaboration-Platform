@@ -66,7 +66,8 @@ const inviteMember = asyncHandler(async (req, res) => {
     });
 
     if (existingInvite) {
-      throw new ApiError(409, "Invite already sent to this email");
+      // Allow resending: delete old invite and create a new one
+      await Invite.deleteOne({ _id: existingInvite._id });
     }
   }
 

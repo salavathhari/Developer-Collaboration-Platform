@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import Navbar from "../components/landing/Navbar";
@@ -9,12 +10,14 @@ import Footer from "../components/landing/Footer";
 const Landing = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
 
-  // If user is already logged in, redirect to dashboard
-  if (user) {
-    navigate("/dashboard");
-    return null;
-  }
+  if (user) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] scroll-smooth">

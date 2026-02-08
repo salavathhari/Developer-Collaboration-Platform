@@ -40,7 +40,7 @@ const InviteModal = ({ open, project, onClose }: InviteModalProps) => {
       setLoading(true);
       setError(null);
       setStatus(null);
-      await inviteMember(project._id || project.id, email.trim());
+      await inviteMember(project._id, email.trim());
       setStatus("Invite email sent successfully!");
     } catch (err: any) {
       setError(err?.response?.data?.message || "Failed to send invite.");

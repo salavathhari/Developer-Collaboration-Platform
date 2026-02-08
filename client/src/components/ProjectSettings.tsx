@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
-import type { Project, User } from "../types";
-import { deleteProject, inviteMember } from "../services/projectService";
+import type { Project } from "../types";
+import { deleteProject } from "../services/projectService";
 import { useAuth } from "../hooks/useAuth";
 import InviteModal from "./InviteModal";
 
@@ -12,7 +12,7 @@ const ProjectSettings = ({ project }: { project: Project }) => {
   const [loading, setLoading] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   
-  const projectId = project._id || project.id;
+  const projectId = project._id;
   const isOwner = project.owner?._id === user?.id || project.owner?.id === user?.id;
 
   const handleDelete = async () => {

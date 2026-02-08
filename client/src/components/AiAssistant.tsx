@@ -10,7 +10,7 @@ const AiAssistant = ({ project }: { project: Project }) => {
 
   // This would be your real user ID logic or extracted from auth context if needed for something specific
   // For standard usage, project._id is enough.
-  const projectId = project._id || project.id;
+  const projectId = project._id;
 
   const handleAsk = async () => {
     if (!prompt.trim()) return;

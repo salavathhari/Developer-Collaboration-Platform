@@ -74,6 +74,12 @@ const Dashboard = () => {
         </button>
       </div>
 
+      {error && (
+        <div className="mb-8 p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200 text-sm">
+          {error}
+        </div>
+      )}
+
       {projects.length === 0 && !loading ? (
         <div className="bg-[#0a0d14] border border-dashed border-gray-800 rounded-xl p-16 flex flex-col items-center justify-center text-center">
              <div className="w-16 h-16 bg-gray-900/50 rounded-2xl flex items-center justify-center mb-6">
@@ -97,8 +103,8 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map(project => (
                 <div 
-                    key={project._id || project.id}
-                    onClick={() => navigate(`/projects/${project._id || project.id}`)}
+                    key={project._id}
+                    onClick={() => navigate(`/projects/${project._id}`)}
                     className="bg-[#0b0c10] border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-all cursor-pointer hover:shadow-lg hover:shadow-indigo-500/5 group"
                 >
                     <div className="flex items-start justify-between mb-4">

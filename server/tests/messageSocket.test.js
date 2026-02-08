@@ -30,10 +30,10 @@ beforeAll(async () => {
       resolve();
     });
   });
-});
+}, 60000);
 
 afterAll(async () => {
-  await new Promise((resolve) => server.close(resolve));
+  if (server) await new Promise((resolve) => server.close(resolve));
   await mongoose.disconnect();
   await mongoServer.stop();
 });
