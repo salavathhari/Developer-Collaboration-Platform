@@ -5,11 +5,6 @@ const Footer = () => {
         <p className="text-gray-500 text-sm">
           © 2026 DevCollab. Built for developers, by developers.
         </p>
-        
-        <div className="flex items-center gap-2 text-gray-500 text-sm md:ml-auto">
-          <span>⚡</span>
-          <span>Made with Emergent</span>
-        </div>
       </div>
     </footer>
   );

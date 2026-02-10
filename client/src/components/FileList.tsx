@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import {
-  Attachment,
   formatFileSize,
   getFileIcon,
   deleteFile,
 } from "../services/attachmentService";
+import type { Attachment } from "../services/attachmentService";
 import FilePreview from "./FilePreview";
 
 interface FileListProps {

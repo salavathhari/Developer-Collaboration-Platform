@@ -86,6 +86,7 @@ export type Task = {
   commentsCount?: number;
   orderKey?: number; // For drag-drop ordering within columns (fractional indexing)
   linkedPRs?: Array<{ _id: string; number: number; title: string; status: string }>; // Array of linked PRs
+  linkedPRId?: { _id: string; number?: number; title?: string; status?: string } | string | null; // Linked PR reference
   linkedFiles?: Array<{ _id: string; filename: string; url: string }>; // Array of linked files
   linkedChatThreads?: string[]; // Array of chat message IDs
   estimatedHours?: number;

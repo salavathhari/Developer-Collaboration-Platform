@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
+import { useEffect, useRef, useState } from "react";
+import ReactDiffViewer from "react-diff-viewer-continued";
 import { getPullRequestById, mergePullRequest, approvePullRequest, rejectPullRequest, getComments, createComment, getPullRequestFile, getCommitHistory } from "../services/prService";
 import type { Comment, PullRequest, Commit } from "../services/prService";
-import type { Project } from "../types";
+import type { Project, Task } from "../types";
 import { useVideo } from "../context/VideoContext";
 import { useAuth } from "../hooks/useAuth";
 import { useSocket } from "../hooks/useSocket";
+import { getProjectFiles, uploadFile as uploadAttachmentFile, type Attachment } from "../services/attachmentService";
+import { taskService } from "../services/taskService";
+import FileList from "./FileList";
 
 const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; onBack?: () => void }) => {
   const [pr, setPr] = useState<PullRequest | null>(null);
@@ -14,6 +17,14 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
   const [newComment, setNewComment] = useState("");
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'files' | 'commits'>('files');
+
+    const [linkedTasks, setLinkedTasks] = useState<Task[]>([]);
+    const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
+    const [selectedTaskId, setSelectedTaskId] = useState("");
+
+    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const [uploadingFile, setUploadingFile] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<{ oldCode: string, newCode: string }>({ oldCode: "", newCode: "" });
@@ -30,10 +41,12 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
            getPullRequestById(prId),
            getComments(prId)
         ]);
-        setPr(prData);
+                setPr(prData.pr);
+                setLinkedTasks(Array.isArray(prData.linkedTasks) ? prData.linkedTasks : []);
         setComments(commentsData);
-        if (prData.filesChanged?.length > 0) {
-            setActiveFile(prData.filesChanged[0].file);
+                if (prData.pr?.filesChanged?.length > 0) {
+                        const firstFile = prData.pr.filesChanged[0].file || prData.pr.filesChanged[0].path;
+                        setActiveFile(firstFile || null);
         }
       } catch (err) {
         console.error(err);
@@ -75,6 +88,35 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
       };
       fetchFile();
   }, [activeFile, prId]);
+
+  useEffect(() => {
+      if (!project?._id || !prId) return;
+      const loadFiles = async () => {
+          try {
+              const files = await getProjectFiles({
+                  projectId: project._id,
+                  context: "pr",
+                  contextId: prId,
+              });
+              setAttachments(files);
+          } catch (error) {
+              console.error("Failed to load PR files", error);
+          }
+      };
+
+      const loadTasks = async () => {
+          try {
+              const result = await taskService.getTasks(project._id);
+              const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+              setAvailableTasks(tasks);
+          } catch (error) {
+              console.error("Failed to load tasks", error);
+          }
+      };
+
+      loadFiles();
+      loadTasks();
+  }, [project?._id, prId]);
 
   useEffect(() => {
       if(!socket || !prId) return;
@@ -143,6 +185,37 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
       }
   };
 
+  const handleLinkTask = async () => {
+      if (!selectedTaskId || !pr) return;
+      try {
+          await taskService.linkPR(project._id, selectedTaskId, { prId: pr._id });
+          const refreshed = await taskService.getTasks(project._id, { linkedPRId: pr._id });
+          setLinkedTasks(Array.isArray(refreshed.tasks) ? refreshed.tasks : []);
+          setSelectedTaskId("");
+      } catch (error) {
+          console.error("Failed to link task", error);
+      }
+  };
+
+  const handleUploadAttachment = async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file || !pr) return;
+      try {
+          setUploadingFile(true);
+          const uploaded = await uploadAttachmentFile({
+              projectId: project._id,
+              relatedPR: pr._id,
+              file,
+          });
+          setAttachments((prev) => [uploaded, ...prev]);
+      } catch (error) {
+          console.error("Failed to upload file", error);
+      } finally {
+          setUploadingFile(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+  };
+
   if(loading) return <div className="p-10 text-center text-gray-500">Loading PR...</div>;
   if(!pr) return <div className="p-10 text-center text-red-500">PR Not Found</div>;
 
@@ -178,8 +251,13 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
                         <div className="flex items-center gap-2 mt-3">
                             <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Reviewers:</span>
                             <div className="flex items-center gap-2">
-                                {pr.reviewers.map(reviewer => {
-                                    const isApproved = pr.approvals?.includes(reviewer._id);
+                                                                {pr.reviewers.map(reviewer => {
+                                                                        const isApproved = Array.isArray(pr.approvals)
+                                                                            ? pr.approvals.some((approval: any) => {
+                                                                                    if (typeof approval === "string") return approval === reviewer._id;
+                                                                                    return approval.userId?._id === reviewer._id || approval.userId === reviewer._id;
+                                                                                })
+                                                                            : false;
                                     return (
                                         <div key={reviewer._id} className="flex items-center gap-1 bg-gray-800 rounded-full pr-2 pl-1 py-1">
                                             <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
@@ -252,19 +330,22 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
              <div className="w-64 border-r border-gray-800 bg-[#0d1017] overflow-y-auto hidden md:block">
                  <div className="p-4 font-bold text-xs uppercase text-gray-500 tracking-wider">Changed Files</div>
                  <ul>
-                     {pr.filesChanged?.map(f => (
+                     {pr.filesChanged?.map(f => {
+                         const filePath = f.file || f.path || "";
+                         return (
                          <li 
-                            key={f.file} 
-                            onClick={() => setActiveFile(f.file)}
-                            className={`px-4 py-2 cursor-pointer text-sm truncate flex justify-between items-center ${activeFile === f.file ? 'bg-indigo-900/30 text-indigo-300 border-l-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+                            key={filePath} 
+                            onClick={() => setActiveFile(filePath)}
+                            className={`px-4 py-2 cursor-pointer text-sm truncate flex justify-between items-center ${activeFile === filePath ? 'bg-indigo-900/30 text-indigo-300 border-l-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
                          >
-                             <span className="truncate flex-1" title={f.file}>{f.file}</span>
+                             <span className="truncate flex-1" title={filePath}>{filePath}</span>
                              <span className="ml-2 text-[10px] flex gap-1">
                                 <span className="text-green-500">+{f.additions}</span>
                                 <span className="text-red-500">-{f.deletions}</span>
                              </span>
                          </li>
-                     ))}
+                        );
+                     })}
                  </ul>
              </div>
 
@@ -275,6 +356,76 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
                     <div className="bg-[#0d1017] p-4 rounded border border-gray-800 text-gray-300 whitespace-pre-wrap">
                         {pr.description || "No description provided."}
                     </div>
+                 </div>
+
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                     <div className="bg-[#0d1017] border border-gray-800 rounded-lg p-4">
+                         <div className="flex items-center justify-between mb-3">
+                             <h3 className="font-bold text-gray-300">Linked Tasks</h3>
+                             <div className="flex items-center gap-2">
+                                 <select
+                                     value={selectedTaskId}
+                                     onChange={(e) => setSelectedTaskId(e.target.value)}
+                                     className="bg-[#050505] border border-gray-700 text-gray-300 text-xs rounded px-2 py-1"
+                                 >
+                                     <option value="">Select task...</option>
+                                     {availableTasks
+                                                                             .filter((task) => {
+                                                                                 if (!task.linkedPRId) return true;
+                                                                                 if (typeof task.linkedPRId === "string") return task.linkedPRId === pr._id;
+                                                                                 return task.linkedPRId._id === pr._id;
+                                                                             })
+                                       .map((task) => (
+                                         <option key={task._id} value={task._id}>
+                                           {task.title}
+                                         </option>
+                                       ))}
+                                 </select>
+                                 <button
+                                     onClick={handleLinkTask}
+                                     disabled={!selectedTaskId}
+                                     className="text-xs bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-white px-2 py-1 rounded"
+                                 >
+                                     Link
+                                 </button>
+                             </div>
+                         </div>
+                         {linkedTasks.length === 0 ? (
+                             <div className="text-sm text-gray-500">No tasks linked yet.</div>
+                         ) : (
+                             <ul className="space-y-2">
+                                 {linkedTasks.map((task) => (
+                                     <li key={task._id} className="flex items-center justify-between bg-[#161b22] border border-gray-800 rounded p-2">
+                                         <div className="text-sm text-gray-300 truncate">{task.title}</div>
+                                         <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-gray-800 text-gray-400">
+                                             {task.status}
+                                         </span>
+                                     </li>
+                                 ))}
+                             </ul>
+                         )}
+                     </div>
+
+                     <div className="bg-[#0d1017] border border-gray-800 rounded-lg p-4">
+                         <div className="flex items-center justify-between mb-3">
+                             <h3 className="font-bold text-gray-300">PR Attachments</h3>
+                             <div>
+                                 <button
+                                     onClick={() => fileInputRef.current?.click()}
+                                     className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                                 >
+                                     {uploadingFile ? "Uploading..." : "Add File"}
+                                 </button>
+                                 <input
+                                     ref={fileInputRef}
+                                     type="file"
+                                     className="hidden"
+                                     onChange={handleUploadAttachment}
+                                 />
+                             </div>
+                         </div>
+                         <FileList files={attachments} className="bg-transparent" />
+                     </div>
                  </div>
 
                  {/* Tab Switcher */}

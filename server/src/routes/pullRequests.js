@@ -12,6 +12,7 @@ router.put("/:id", authenticate, prController.updatePullRequest);
 router.post("/:id/approve", authenticate, prController.approvePullRequest);
 router.put("/:id/reject", authenticate, prController.rejectPullRequest);
 router.post("/:id/merge", authenticate, prController.mergePullRequest);
+router.post("/:id/link-file", authenticate, prController.linkFileToPullRequest);
 
 // Comments
 router.get("/:id/comments", authenticate, prController.getComments);

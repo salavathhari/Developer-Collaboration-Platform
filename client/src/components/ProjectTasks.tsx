@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import type { Task, Project, User } from '../types';
 import { taskService } from '../services/taskService';
+import { getProjectMembers } from '../services/projectService';
 import TaskBoard from './TaskBoard';
 import TaskModal from './TaskModal';
 import CreateTaskModal from './CreateTaskModal';
@@ -16,23 +17,82 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterPriority, setFilterPriority] = useState<string>('all');
-  const [filterAssignee, setFilterAssignee] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filters, setFilters] = useState({
+    search: '',
+    status: 'all',
+    priority: 'all',
+    assignee: 'all',
+  });
+  const [members, setMembers] = useState<Project['members']>([]);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const activeFilters = useMemo(() => {
+    const items: Array<{ key: string; label: string }> = [];
+    if (filters.search.trim()) {
+      items.push({ key: 'search', label: `Search: ${filters.search}` });
+    }
+    if (filters.status !== 'all') {
+      items.push({ key: 'status', label: `Status: ${filters.status.replace('_', ' ')}` });
+    }
+    if (filters.priority !== 'all') {
+      items.push({ key: 'priority', label: `Priority: ${filters.priority}` });
+    }
+    if (filters.assignee !== 'all') {
+      const member = members.find((m) => m.user._id === filters.assignee);
+      items.push({ key: 'assignee', label: `Assignee: ${member?.user.name || 'Unassigned'}` });
+    }
+    return items;
+  }, [filters, members]);
 
   useEffect(() => {
     loadTasks();
   }, [project._id]);
 
+  useEffect(() => {
+    if (!project._id) return;
+    const loadMembers = async () => {
+      try {
+        const data = await getProjectMembers(project._id);
+        setMembers(data.members || []);
+      } catch (err) {
+        console.error('Failed to load project members', err);
+      }
+    };
+    loadMembers();
+  }, [project._id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(filters.search);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [filters.search]);
+
+  useEffect(() => {
+    loadTasks();
+  }, [filters.status, filters.priority, filters.assignee, debouncedSearch, project._id]);
+
   const loadTasks = async () => {
     try {
       setLoading(true);
-      const result = await taskService.getTasks(project._id);
+      setError(null);
+      const result = await taskService.getTasks(project._id, {
+        status: filters.status !== 'all' ? filters.status : undefined,
+        priority: filters.priority !== 'all' ? filters.priority : undefined,
+        assignee:
+          filters.assignee !== 'all' && filters.assignee !== ''
+            ? filters.assignee
+            : undefined,
+        search: debouncedSearch || undefined,
+        limit: 200,
+      });
       setTasks(Array.isArray(result.tasks) ? result.tasks : []); // Ensure we always have an array
     } catch (err) {
       console.error("Failed to load tasks", err);
       setTasks([]); // Set empty array on error
+      setError('Unable to load tasks. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -70,16 +130,23 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
       }
   };
 
-  // Client-side filtering for responsiveness, or use API if list is huge
-  // We implemented API params, but client-side is smoother for small lists < 1000
-  const filteredTasks = tasks.filter(t => {
-      const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            t.description?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesPriority = filterPriority === 'all' || t.priority === filterPriority;
-      const matchesAssignee = filterAssignee === 'all' || (t.assignedTo?._id === filterAssignee);
-      const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
+  const filteredTasks = useMemo(() => {
+    const searchLower = filters.search.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const matchesSearch = !searchLower ||
+        task.title.toLowerCase().includes(searchLower) ||
+        task.description?.toLowerCase().includes(searchLower);
+      const matchesPriority = filters.priority === 'all' || task.priority === filters.priority;
+      const matchesAssignee =
+        filters.assignee === 'all' ||
+        (filters.assignee === ''
+          ? !task.assignees?.length && !task.assignedTo
+          : task.assignees?.some((assignee) => assignee._id === filters.assignee) ||
+            task.assignedTo?._id === filters.assignee);
+      const matchesStatus = filters.status === 'all' || task.status === filters.status;
       return matchesSearch && matchesPriority && matchesAssignee && matchesStatus;
-  });
+    });
+  }, [tasks, filters]);
 
   // Quick stats
   const stats = {
@@ -89,7 +156,15 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
       overdue: tasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'done').length
   };
 
-  if (loading) return <div className="p-10 text-center text-gray-500">Loading tasks...</div>;
+  if (loading) {
+    return (
+      <div className="p-6 space-y-4">
+        <div className="h-10 w-1/3 bg-gray-800/50 rounded animate-pulse" />
+        <div className="h-16 bg-gray-800/30 rounded animate-pulse" />
+        <div className="h-64 bg-gray-800/20 rounded animate-pulse" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-[#050505]">
@@ -124,10 +199,10 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
             <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                 <input 
-                    type="text" 
-                    placeholder="Search tasks..." 
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
+                  type="text" 
+                  placeholder="Search tasks..." 
+                  value={filters.search}
+                  onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
                     className="bg-[#111] border border-white/10 rounded-full pl-9 pr-4 py-1.5 text-sm text-gray-300 focus:border-indigo-500 focus:outline-none w-64 transition-colors"
                 />
             </div>
@@ -135,8 +210,8 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
             <div className="flex items-center gap-2 border-l border-white/10 pl-4">
                 <Filter className="w-4 h-4 text-gray-500" />
                 <select 
-                    value={filterStatus}
-                    onChange={e => setFilterStatus(e.target.value)}
+                  value={filters.status}
+                  onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
                     className="bg-transparent text-sm text-gray-400 focus:text-white focus:outline-none cursor-pointer"
                 >
                     <option value="all">Any Status</option>
@@ -144,18 +219,18 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
                     <option value="in_progress">In Progress</option>
                     <option value="review">Review</option>
                     <option value="blocked">Blocked</option>
-                    <option value="completed">Completed</option>
+                  <option value="done">Done</option>
                 </select>
             </div>
             
             <div className="flex items-center gap-2">
                 <select 
-                    value={filterPriority}
-                    onChange={e => setFilterPriority(e.target.value)}
+                  value={filters.priority}
+                  onChange={e => setFilters(prev => ({ ...prev, priority: e.target.value }))}
                     className="bg-transparent text-sm text-gray-400 focus:text-white focus:outline-none cursor-pointer"
                 >
                     <option value="all">Any Priority</option>
-                    <option value="urgent">Urgent</option>
+                  <option value="critical">Critical</option>
                     <option value="high">High</option>
                     <option value="medium">Medium</option>
                     <option value="low">Low</option>
@@ -164,25 +239,22 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
 
             <div className="flex items-center gap-2">
                  <select 
-                    value={filterAssignee}
-                    onChange={e => setFilterAssignee(e.target.value)}
+                    value={filters.assignee}
+                    onChange={e => setFilters(prev => ({ ...prev, assignee: e.target.value }))}
                     className="bg-transparent text-sm text-gray-400 focus:text-white focus:outline-none cursor-pointer"
                 >
                     <option value="all">Any Assignee</option>
                     <option value="">Unassigned</option>
-                    {project.members?.map(m => (
+                    {members?.map(m => (
                         <option key={m.user._id} value={m.user._id}>{m.user.name}</option>
                     ))}
                 </select>
             </div>
 
-            {(filterStatus !== 'all' || filterPriority !== 'all' || filterAssignee !== 'all' || searchQuery) && (
+            {(filters.status !== 'all' || filters.priority !== 'all' || filters.assignee !== 'all' || filters.search) && (
               <button
                 onClick={() => {
-                  setFilterStatus('all');
-                  setFilterPriority('all');
-                  setFilterAssignee('all');
-                  setSearchQuery('');
+                  setFilters({ search: '', status: 'all', priority: 'all', assignee: 'all' });
                 }}
                 className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
               >
@@ -190,6 +262,10 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
               </button>
             )}
         </div>
+
+        {error && (
+          <div className="text-xs text-red-400">{error}</div>
+        )}
 
         <button 
             onClick={handleCreateTask}
@@ -200,13 +276,32 @@ const ProjectTasks: React.FC<ProjectTasksProps> = ({ project }) => {
         </button>
       </div>
 
+      {activeFilters.length > 0 && (
+        <div className="px-6 py-3 border-b border-white/5 bg-[#050505] flex flex-wrap items-center gap-2">
+          {activeFilters.map((filter) => (
+            <span
+              key={filter.key}
+              className="text-xs text-gray-300 bg-white/5 border border-white/10 px-2 py-1 rounded-full"
+            >
+              {filter.label}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Board */}
       <div className="flex-1 overflow-hidden bg-[#050505]">
-        <TaskBoard 
-            projectId={project._id} 
-            initialTasks={filteredTasks}
-            onRefresh={loadTasks}
-        />
+        {filteredTasks.length === 0 ? (
+          <div className="p-10 text-center text-gray-500">
+            No tasks found.
+          </div>
+        ) : (
+          <TaskBoard 
+              projectId={project._id} 
+              initialTasks={filteredTasks}
+              onRefresh={loadTasks}
+          />
+        )}
       </div>
 
       {/* Modal */}

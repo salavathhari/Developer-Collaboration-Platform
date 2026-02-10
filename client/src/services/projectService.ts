@@ -16,6 +16,13 @@ export const getProject = async (projectId: string) => {
   return response.data.project;
 };
 
+export const getProjectMembers = async (projectId: string) => {
+  const response = await api.get<{ owner: Project["owner"]; members: Project["members"] }>(
+    `/api/projects/${projectId}/members`
+  );
+  return response.data;
+};
+
 export const createProject = async (payload: CreateProjectPayload) => {
   const response = await api.post<{ project: Project }>("/api/projects", payload);
   return response.data.project;

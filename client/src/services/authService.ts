@@ -2,19 +2,22 @@ import api from "./api";
 import type { User } from "../types";
 
 export type AuthResponse = {
-  token: string;
+  success: boolean;
+  accessToken: string;
   expiresIn: string;
   user: User;
 };
 
 export type RefreshResponse = {
-  token: string;
+  success: boolean;
+  accessToken: string;
   expiresIn: string;
 };
 
 export type LoginPayload = {
   email: string;
   password: string;
+  rememberMe?: boolean;
 };
 
 export type SignupPayload = {
@@ -29,13 +32,24 @@ export type ProfileUpdatePayload = {
   bio?: string;
 };
 
-export const login = async (payload: LoginPayload) => {
-  const response = await api.post<AuthResponse>("/api/auth/login", payload);
+export const login = async (
+  email: string,
+  password: string,
+  rememberMe: boolean = false
+) => {
+  const response = await api.post<AuthResponse>("/api/auth/login", {
+    email,
+    password,
+    rememberMe,
+  });
   return response.data;
 };
 
 export const register = async (payload: SignupPayload) => {
-  const response = await api.post<AuthResponse>("/api/auth/register", payload);
+  const response = await api.post<{ success: boolean; message: string; user: { id: string; name: string; email: string } }>(
+    "/api/auth/register",
+    payload
+  );
   return response.data;
 };
 

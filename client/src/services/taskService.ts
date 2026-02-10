@@ -58,16 +58,17 @@ export const taskService = {
     params?: {
       status?: string;
       priority?: string;
-      assignees?: string;
-      labels?: string;
+      assignee?: string;
+      label?: string;
       search?: string;
       page?: number;
       limit?: number;
+      linkedPRId?: string;
     }
   ) => {
     const response = await api.get<{ success: boolean; tasks: Task[]; total: number; page: number; totalPages: number }>(
-      `/api/projects/${projectId}/tasks`,
-      { params }
+      `/api/tasks`,
+      { params: { projectId, ...params } }
     );
     return response.data;
   },

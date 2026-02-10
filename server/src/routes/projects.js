@@ -12,6 +12,7 @@ const {
   createProject,
   getMyProjects,
   getProjectById,
+  getProjectMembers,
   inviteMember,
   createInviteLink,
   acceptInvite,
@@ -23,6 +24,7 @@ const router = express.Router();
 
 router.get("/", authenticate, getMyProjects);
 router.get("/:projectId", authenticate, getProjectById);
+router.get("/:projectId/members", authenticate, getProjectMembers);
 router.post("/", authenticate, validateProjectCreate, createProject);
 router.delete("/:projectId", authenticate, requireProjectOwner, deleteProject);
 router.post(

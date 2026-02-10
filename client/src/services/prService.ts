@@ -33,10 +33,12 @@ export interface Comment {
 }
 
 export interface DiffFile {
-    file: string;
+    file?: string;
+    path?: string;
     additions: number;
     deletions: number;
     status: string;
+    diffSnippet?: string;
 }
 
 export interface DiffResult {
@@ -60,8 +62,10 @@ export const getPullRequests = async (projectId: string) => {
 };
 
 export const getPullRequestById = async (id: string) => {
-  const response = await api.get<{ success: boolean; pr: PullRequest }>(`/api/pull-requests/${id}`);
-  return response.data.pr; // Extract pr object from response
+    const response = await api.get<{ success: boolean; pr: PullRequest; linkedTasks?: any[] }>(
+        `/api/pull-requests/${id}`
+    );
+    return response.data; // return pr + linkedTasks
 };
 
 export const createPullRequest = async (projectId: string, data: any) => {

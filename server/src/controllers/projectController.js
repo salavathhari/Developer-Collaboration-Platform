@@ -248,6 +248,30 @@ const updateMemberRole = asyncHandler(async (req, res) => {
   return res.status(200).json({ project });
 });
 
+const getProjectMembers = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const project = await Project.findById(projectId)
+    .populate("owner", "name email avatar")
+    .populate("members.user", "name email avatar");
+
+  if (!project) {
+    throw new ApiError(404, "Project not found");
+  }
+
+  const isMember =
+    project.owner._id.toString() === req.user.id ||
+    project.members.some((member) => member.user._id.toString() === req.user.id);
+
+  if (!isMember) {
+    throw new ApiError(403, "You do not have access to this project");
+  }
+
+  return res.status(200).json({
+    owner: project.owner,
+    members: project.members,
+  });
+});
+
 const deleteProject = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
   const project = await Project.findById(projectId);
@@ -269,6 +293,7 @@ module.exports = {
   createProject,
   getMyProjects,
   getProjectById,
+  getProjectMembers,
   inviteMember,
   createInviteLink,
   acceptInvite,

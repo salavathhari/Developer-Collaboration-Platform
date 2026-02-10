@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import NotificationsBell from "./NotificationsBell";
+import logo from "../assets/devcollablogo-removebg-preview.png";
 
 const TopBar = () => {
   const { logout } = useAuth();
@@ -12,11 +13,11 @@ const TopBar = () => {
         className="flex items-center gap-3 cursor-pointer group" 
         onClick={() => navigate("/")}
       >
-        <div className="text-indigo-500 group-hover:text-indigo-400 transition-colors">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 12L5 15L2 12M22 12L19 15L16 12M5 9L8 6L11 9M16 9L19 6L22 9M11 15L14 18L17 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
+        <img
+          src={logo}
+          alt="DevCollab logo"
+          className="h-7 w-7 object-contain"
+        />
         <span className="text-xl font-bold font-mono text-white tracking-tight">DevCollab</span>
       </div>
 

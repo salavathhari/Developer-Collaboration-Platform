@@ -58,6 +58,7 @@ const pullRequestSchema = new mongoose.Schema(
         additions: Number,
         deletions: Number,
         status: String, // 'added', 'modified', 'deleted'
+        diffSnippet: String,
       },
     ],
     reviewers: [

@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const Task = require("../models/Task");
 const PullRequest = require("../models/PullRequest");
 const File = require("../models/File");
+const Project = require("../models/Project");
 const Notification = require("../models/Notification");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
@@ -44,26 +45,36 @@ const uploadAttachment = (req, res, next) => {
   });
 };
 
-/**
- * GET /api/tasks/:projectId
- * Fetch tasks with advanced filtering, search, and pagination
- */
-const getTasks = asyncHandler(async (req, res) => {
-  const { projectId } = req.params;
+const ensureProjectMember = async (projectId, userId) => {
+  const project = await Project.findById(projectId);
+  if (!project) {
+    throw new ApiError(404, "Project not found");
+  }
+
+  const isOwner = project.owner.toString() === userId.toString();
+  const isMember = project.members.some(
+    (member) => member.user.toString() === userId.toString()
+  );
+
+  if (!isOwner && !isMember) {
+    throw new ApiError(403, "Project access required");
+  }
+
+  return project;
+};
+
+const buildTaskQuery = (projectId, queryParams) => {
   const {
     status,
     priority,
     assignee,
     label,
+    linkedPRId,
     search,
-    sort = "-updatedAt",
-    limit = 50,
-    offset = 0,
-  } = req.query;
+  } = queryParams;
 
   const query = { projectId };
 
-  // Filters
   if (status) {
     query.status = Array.isArray(status) ? { $in: status } : status;
   }
@@ -71,25 +82,57 @@ const getTasks = asyncHandler(async (req, res) => {
     query.priority = Array.isArray(priority) ? { $in: priority } : priority;
   }
   if (assignee) {
-    query.assignees = assignee;
+    query.$or = query.$or || [];
+    query.$or.push({ assignees: assignee }, { assignedTo: assignee });
   }
   if (label) {
     query.labels = Array.isArray(label) ? { $in: label } : label;
   }
+  if (linkedPRId) {
+    query.linkedPRId = linkedPRId;
+  }
 
-  // Search
   if (search) {
-    query.$or = [
+    const searchClause = [
       { title: { $regex: search, $options: "i" } },
       { description: { $regex: search, $options: "i" } },
-      { labels: { $regex: search, $options: "i" } },
     ];
+    if (query.$or) {
+      query.$and = [{ $or: query.$or }, { $or: searchClause }];
+      delete query.$or;
+    } else {
+      query.$or = searchClause;
+    }
   }
+
+  return query;
+};
+
+/**
+ * GET /api/projects/:projectId/tasks
+ * Fetch tasks with advanced filtering, search, and pagination
+ */
+const getTasks = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const {
+    sort = "-updatedAt",
+    limit = 50,
+    page = 1,
+    offset,
+  } = req.query;
+
+  await ensureProjectMember(projectId, req.user.id);
+  const query = buildTaskQuery(projectId, req.query);
+
+  const normalizedLimit = parseInt(limit);
+  const normalizedOffset = offset !== undefined
+    ? parseInt(offset)
+    : (parseInt(page) - 1) * normalizedLimit;
 
   const tasks = await Task.find(query)
     .sort(sort)
-    .limit(parseInt(limit))
-    .skip(parseInt(offset))
+    .limit(normalizedLimit)
+    .skip(normalizedOffset)
     .populate("assignedTo", "username email avatar")
     .populate("assignees", "username email avatar")
     .populate("createdBy", "username email avatar")
@@ -104,8 +147,56 @@ const getTasks = asyncHandler(async (req, res) => {
     success: true,
     tasks,
     total,
-    limit: parseInt(limit),
-    offset: parseInt(offset),
+    limit: normalizedLimit,
+    offset: normalizedOffset,
+  });
+});
+
+/**
+ * GET /api/tasks
+ * Fetch tasks by projectId query param
+ */
+const getTasksByQuery = asyncHandler(async (req, res) => {
+  const { projectId } = req.query;
+  const {
+    sort = "-updatedAt",
+    limit = 50,
+    page = 1,
+    offset,
+  } = req.query;
+
+  if (!projectId) {
+    throw new ApiError(400, "projectId is required");
+  }
+
+  await ensureProjectMember(projectId, req.user.id);
+  const query = buildTaskQuery(projectId, req.query);
+
+  const normalizedLimit = parseInt(limit);
+  const normalizedOffset = offset !== undefined
+    ? parseInt(offset)
+    : (parseInt(page) - 1) * normalizedLimit;
+
+  const tasks = await Task.find(query)
+    .sort(sort)
+    .limit(normalizedLimit)
+    .skip(normalizedOffset)
+    .populate("assignedTo", "name email avatar")
+    .populate("assignees", "name email avatar")
+    .populate("createdBy", "name email avatar")
+    .populate("linkedPRId", "number title status")
+    .populate("linkedIssueId", "title status")
+    .populate("linkedFiles", "name size path")
+    .lean();
+
+  const total = await Task.countDocuments(query);
+
+  return res.status(200).json({
+    success: true,
+    tasks,
+    total,
+    limit: normalizedLimit,
+    offset: normalizedOffset,
   });
 });
 
@@ -464,6 +555,7 @@ const addAttachment = asyncHandler(async (req, res) => {
 
 module.exports = {
   getTasks,
+  getTasksByQuery,
   getTask,
   getTaskAnalytics,
   createTask,

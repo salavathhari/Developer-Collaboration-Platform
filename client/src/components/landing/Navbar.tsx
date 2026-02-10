@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import logo from "../../assets/devcollablogo-removebg-preview.png";
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -9,7 +10,11 @@ const Navbar = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
-            <span className="text-xl font-bold text-indigo-500">&lt;/&gt;</span>
+            <img
+              src={logo}
+              alt="DevCollab logo"
+              className="h-9 w-9 object-contain"
+            />
             <span className="text-lg font-bold font-mono text-white tracking-tight">DevCollab</span>
           </div>
 

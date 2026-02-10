@@ -3,6 +3,7 @@ import { type Task, type User } from '../types';
 import { taskService } from '../services/taskService';
 import { X, User as UserIcon, Calendar, Clock, Paperclip, Send, Trash2, CheckSquare, MessageSquare, Tag, Plus } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { useSearchParams } from 'react-router-dom';
 
 interface TaskModalProps {
   projectId: string;
@@ -15,6 +16,7 @@ interface TaskModalProps {
 
 const TaskModal: React.FC<TaskModalProps> = ({ projectId, task, projectMembers, onClose, onUpdate, onDelete }) => {
   const { user } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
   const [commentText, setCommentText] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -29,6 +31,20 @@ const TaskModal: React.FC<TaskModalProps> = ({ projectId, task, projectMembers, 
   const [dueDate, setDueDate] = useState(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
   const [labels, setLabels] = useState<string[]>(task.labels || []);
   const [newLabel, setNewLabel] = useState('');
+
+    const linkedPrId = typeof task.linkedPRId === 'string'
+        ? task.linkedPRId
+        : task.linkedPRId?._id || '';
+    const linkedPrLabel = typeof task.linkedPRId === 'object' && task.linkedPRId
+        ? `#${task.linkedPRId.number || linkedPrId.slice(0, 6)}`
+        : linkedPrId
+            ? `#${linkedPrId.slice(0, 6)}`
+            : '';
+
+    const openLinkedPR = () => {
+        if (!linkedPrId) return;
+        setSearchParams({ tab: 'prs', prId: linkedPrId });
+    };
 
   const handleSave = async () => {
       try {
@@ -187,6 +203,22 @@ const TaskModal: React.FC<TaskModalProps> = ({ projectId, task, projectMembers, 
 
                     {/* Right Col - Meta */}
                     <div className="space-y-6">
+                        {/* Linked PR */}
+                        <div>
+                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Linked PR</label>
+                             {linkedPrId ? (
+                                 <button
+                                     onClick={openLinkedPR}
+                                     className="w-full flex items-center justify-between bg-[#161b22] border border-gray-700 rounded px-3 py-2 text-sm text-indigo-400 hover:text-indigo-300"
+                                 >
+                                     <span className="truncate">{linkedPrLabel}</span>
+                                     <span className="text-xs text-gray-500">Open</span>
+                                 </button>
+                             ) : (
+                                 <span className="text-sm text-gray-500 italic">No linked PR</span>
+                             )}
+                        </div>
+
                         {/* Status */}
                         <div>
                              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Status</label>

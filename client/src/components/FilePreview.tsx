@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Attachment, getFile, isPreviewable } from "../services/attachmentService";
+import { getFile, isPreviewable } from "../services/attachmentService";
+import type { Attachment } from "../services/attachmentService";
 
 interface FilePreviewProps {
   file: Attachment;

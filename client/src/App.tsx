@@ -48,8 +48,8 @@ const PrRedirect = () => {
         const resolve = async () => {
             try {
                 if(!prId) return;
-                const pr = await getPullRequestById(prId);
-                navigate(`/project/${pr.projectId}?tab=prs&prId=${prId}`, { replace: true });
+                const result = await getPullRequestById(prId);
+                navigate(`/project/${result.pr.projectId}?tab=prs&prId=${prId}`, { replace: true });
             } catch(e) {
                 console.error(e);
                 navigate('/dashboard');
