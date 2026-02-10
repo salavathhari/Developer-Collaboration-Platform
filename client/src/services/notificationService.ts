@@ -14,3 +14,10 @@ export const markNotificationRead = async (id: string) => {
   );
   return response.data.notification;
 };
+
+export const markAllNotificationsRead = async () => {
+  const response = await api.patch<{ success: boolean }>(
+    "/api/notifications/read-all"
+  );
+  return response.data;
+};

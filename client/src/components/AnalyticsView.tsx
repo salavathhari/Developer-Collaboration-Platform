@@ -58,10 +58,13 @@ const AnalyticsView = ({ project }: { project: Project }) => {
   const messagesSent = activityCounts.byType?.messageSent || 0;
   const filesUploaded = activityCounts.byType?.fileUploaded || 0;
   
+  // Code Stats
+  const codeStats = insight?.analytics?.codeStats || { commits: 0, activeBranches: 0, mergedPRs: 0, avgMergeTimeHours: 0 };
+  
   // Tasks breakdown
   const todoCount = taskCounts.byStatus?.todo || 0;
   const inProgressCount = (taskCounts.byStatus?.in_progress || 0) + (taskCounts.byStatus?.review || 0);
-  const doneCount = taskCounts.byStatus?.done || 0;
+  const doneCount = (taskCounts.byStatus?.done || 0) + (taskCounts.byStatus?.completed || 0); // Support both for backwards compatibility
   
   const completionRate = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
 
@@ -77,15 +80,12 @@ const AnalyticsView = ({ project }: { project: Project }) => {
   const progressOffset = -1 * donePercent * circumference;
   const todoOffset = -1 * (donePercent + progressPercent) * circumference;
 
-  // Bar Chart Data (Top Contributors)
-  // insight.analytics.workloadByAssignee contains openTasks, overdueTasks
-  // We'll map it to a simple array
-  const contributors = (insight?.analytics?.workloadByAssignee || [])
-    .sort((a, b) => (b.openTasks + b.overdueTasks) - (a.openTasks + a.overdueTasks))
+  // Bar Chart Data (Top Contributors by commits)
+  const contributors = (insight?.analytics?.topContributors || [])
     .slice(0, 5); // top 5
   
   // Calculate max scale
-  const maxWorkload = Math.max(...contributors.map(c => c.openTasks + c.overdueTasks), 5); // at least 5 for scale
+  const maxCommits = Math.max(...contributors.map(c => c.commits), 5); // at least 5 for scale
 
   return (
     <div className="h-full flex flex-col px-8 py-6 max-w-[1600px] mx-auto overflow-y-auto custom-scrollbar">
@@ -129,6 +129,47 @@ const AnalyticsView = ({ project }: { project: Project }) => {
            <div className="text-3xl font-bold text-white font-mono mb-1">{filesUploaded}</div>
            <div className="text-sm text-gray-400 font-mono">Files Uploaded</div>
         </div>
+      </div>
+
+      {/* Code Metrics Row */}
+      <h3 className="text-lg font-bold text-white font-mono mb-6">Code Activity (7d)</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          
+          {/* Commits */}
+          <div className="bg-[#0b0c10] border border-gray-800 rounded-xl p-6 relative group hover:border-amber-500/30 transition-colors">
+             <div className="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center mb-4 text-amber-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+             </div>
+             <div className="text-3xl font-bold text-white font-mono mb-1">{codeStats.commits}</div>
+             <div className="text-sm text-gray-400 font-mono">Commits</div>
+          </div>
+
+          {/* Active Branches */}
+          <div className="bg-[#0b0c10] border border-gray-800 rounded-xl p-6 relative group hover:border-pink-500/30 transition-colors">
+             <div className="w-12 h-12 rounded-lg bg-pink-500/10 flex items-center justify-center mb-4 text-pink-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" /></svg>
+             </div>
+             <div className="text-3xl font-bold text-white font-mono mb-1">{codeStats.activeBranches}</div>
+             <div className="text-sm text-gray-400 font-mono">Active Branches</div>
+          </div>
+
+          {/* Merged PRs */}
+          <div className="bg-[#0b0c10] border border-gray-800 rounded-xl p-6 relative group hover:border-purple-500/30 transition-colors">
+             <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center mb-4 text-purple-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+             </div>
+             <div className="text-3xl font-bold text-white font-mono mb-1">{codeStats.mergedPRs}</div>
+             <div className="text-sm text-gray-400 font-mono">Merged PRs</div>
+          </div>
+
+          {/* Avg Merge Time */}
+          <div className="bg-[#0b0c10] border border-gray-800 rounded-xl p-6 relative group hover:border-cyan-500/30 transition-colors">
+             <div className="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center mb-4 text-cyan-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             </div>
+             <div className="text-3xl font-bold text-white font-mono mb-1">{Number(codeStats.avgMergeTimeHours).toFixed(1)}h</div>
+             <div className="text-sm text-gray-400 font-mono">Avg Merge Time</div>
+          </div>
       </div>
 
       {/* Charts Row */}
@@ -200,14 +241,18 @@ const AnalyticsView = ({ project }: { project: Project }) => {
                     <div className="text-gray-600 font-mono text-sm self-center">No contributor data</div>
                 ) : (
                     contributors.map((c, i) => {
-                        const total = c.openTasks + c.overdueTasks;
-                        const heightPercent = totalTasks > 0 ? (total / maxWorkload) * 100 : 0;
+                        const commits = c.commits || 0;
+                        const heightPercent = maxCommits > 0 ? (commits / maxCommits) * 100 : 0;
                         return (
-                            <div key={i} className="flex flex-col items-center gap-2 w-12 sm:w-16">
+                            <div key={i} className="flex flex-col items-center gap-2 w-12 sm:w-16 group relative">
                                 <div 
-                                    className="w-full bg-green-500 hover:bg-green-400 transition-all rounded-t-sm"
-                                    style={{ height: `${Math.max(heightPercent, 2)}%` }} // min height for visibility
-                                />
+                                    className="w-full bg-green-500 hover:bg-green-400 transition-all rounded-t-sm relative"
+                                    style={{ height: `${Math.max(heightPercent, 5)}%` }} // min height for visibility
+                                >
+                                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                        {commits} commits
+                                    </div>
+                                </div>
                                 <span className="text-xs text-gray-500 font-mono truncate w-full text-center">{c.name.split(' ')[0].toLowerCase()}</span>
                             </div>
                         )

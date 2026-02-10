@@ -3,34 +3,81 @@ import { Link } from "react-router-dom";
 import { getPullRequests, createPullRequest } from "../services/prService";
 import type { PullRequest } from "../services/prService";
 import type { Project } from "../types";
+import { useSocket } from "../hooks/useSocket";
 
 const PRList = ({ project, onSelect }: { project: Project; onSelect: (id: string) => void }) => {
   const [prs, setPrs] = useState<PullRequest[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [newPR, setNewPR] = useState({ title: "", description: "", baseBranch: "main", headBranch: "develop" });
+  
+  const socket = useSocket(localStorage.getItem("token"));
+
+  const [newPR, setNewPR] = useState({ 
+      title: "", 
+      description: "", 
+      baseBranch: "main", 
+      headBranch: "develop",
+      reviewers: [] as string[]
+  });
 
   useEffect(() => {
     const fetchPRs = async () => {
       try {
         const data = await getPullRequests(project._id);
-        setPrs(data);
+        setPrs(Array.isArray(data) ? data : []); // Ensure we always have an array
       } catch (error) {
         console.error("Failed to fetch PRs:", error);
+        setPrs([]); // Set empty array on error
       }
     };
     fetchPRs();
   }, [project._id]);
 
+  useEffect(() => {
+    if (!socket) return;
+    
+    const handleCreated = (pr: PullRequest) => {
+        if(pr.projectId === project._id) {
+            setPrs(prev => {
+                if (prev.some(p => p._id === pr._id)) return prev;
+                return [pr, ...prev];
+            });
+        }
+    };
+
+    const handleUpdated = (updatedPr: PullRequest) => {
+        if(updatedPr.projectId === project._id) {
+            setPrs(prev => prev.map(p => p._id === updatedPr._id ? { ...p, ...updatedPr } : p));
+        }
+    };
+
+    socket.on("pr_created", handleCreated);
+    socket.on("pr_updated", handleUpdated);
+
+    return () => {
+        socket.off("pr_created", handleCreated);
+        socket.off("pr_updated", handleUpdated);
+    };
+  }, [socket, project._id]);
+
   const handleCreate = async () => {
     try {
       const pr = await createPullRequest(project._id, newPR);
-      setPrs([...prs, pr]);
+      setPrs(prev => prev.some(p => p._id === pr._id) ? prev : [pr, ...prev]);
       setShowCreate(false);
-      setNewPR({ title: "", description: "", baseBranch: "main", headBranch: "develop" });
+      setNewPR({ title: "", description: "", baseBranch: "main", headBranch: "develop", reviewers: [] });
     } catch (error) {
       console.error("Failed to create PR:", error);
-      alert("Failed to create PR");
+      alert("Failed to create PR: " + ((error as any).response?.data?.message || "Unknown error"));
     }
+  };
+
+  const toggleReviewer = (userId: string) => {
+      setNewPR(prev => ({
+          ...prev,
+          reviewers: prev.reviewers.includes(userId) 
+            ? prev.reviewers.filter(id => id !== userId)
+            : [...prev.reviewers, userId]
+      }));
   };
 
   return (
@@ -56,11 +103,14 @@ const PRList = ({ project, onSelect }: { project: Project; onSelect: (id: string
                 <div className="text-xs text-gray-500 mt-1 flex gap-2">
                   <span className={`px-1.5 py-0.5 rounded-full capitalize ${
                       pr.status === 'open' ? 'bg-green-500/10 text-green-400' : 
-                      pr.status === 'merged' ? 'bg-purple-500/10 text-purple-400' : 'bg-red-500/10 text-red-400'
+                      pr.status === 'merged' ? 'bg-purple-500/10 text-purple-400' : 
+                      pr.status === 'approved' ? 'bg-blue-500/10 text-blue-400' :
+                      pr.status === 'blocked' ? 'bg-yellow-500/10 text-yellow-400' :
+                      'bg-red-500/10 text-red-400'
                   }`}>
                     {pr.status}
                   </span>
-                  <span>#{pr._id.substring(0,6)} by {pr.author?.name || 'Unknown'}</span>
+                  <span>#{pr.number || pr._id.substring(0,6)} by {pr.author?.username || pr.author?.name || 'Unknown'}</span>
                   <span>created {new Date(pr.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
@@ -111,6 +161,27 @@ const PRList = ({ project, onSelect }: { project: Project; onSelect: (id: string
                         value={newPR.headBranch}
                         onChange={(e) => setNewPR({ ...newPR, headBranch: e.target.value })}
                       />
+                  </div>
+              </div>
+
+              <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Reviewers</label>
+                  <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-gray-800 p-2 rounded bg-[#0a0c10]">
+                      {project.members && project.members.length > 0 ? project.members.map(m => (
+                          <button 
+                            key={m.user.id || m.user._id}
+                            onClick={() => toggleReviewer(m.user.id || m.user._id || '')}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${
+                                newPR.reviewers.includes(m.user.id || m.user._id || '') 
+                                ? 'bg-indigo-600 border-indigo-600 text-white' 
+                                : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                            }`}
+                          >
+                              {m.user.name}
+                          </button>
+                      )) : (
+                          <span className="text-xs text-gray-600">No other members in project</span>
+                      )}
                   </div>
               </div>
             </div>

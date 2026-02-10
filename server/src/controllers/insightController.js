@@ -1,9 +1,13 @@
 const Activity = require("../models/Activity");
 const ProjectInsight = require("../models/ProjectInsight");
 const Task = require("../models/Task");
+const PullRequest = require("../models/PullRequest");
+const Commit = require("../models/Commit");
+const Repository = require("../models/Repository");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
 const { callAi } = require("../utils/aiClient");
+const gitService = require("../services/gitService");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -97,8 +101,76 @@ const generateInsights = asyncHandler(async (req, res) => {
   const windowStart = new Date(now.getTime() - windowDays * DAY_MS);
 
   const tasks = await Task.find({ projectId })
-    .populate("assignees", "name")
+    .populate("assignedTo", "name")
     .sort({ updatedAt: -1 });
+
+  // --- CODE STATS ---
+  const prs = await PullRequest.find({
+      projectId,
+      createdAt: { $gte: windowStart } 
+  }).lean();
+
+  // Get commits and branches directly from git repository
+  let commits = [];
+  let activeBranches = 0;
+  try {
+      if (gitService.repoExists(projectId)) {
+          const branches = await gitService.getBranches(projectId);
+          activeBranches = branches.length;
+          const commitSet = new Set(); // Prevent duplicate commits across branches
+          
+          // Get commits from all branches
+          for (const branch of branches) {
+              try {
+                  const branchCommits = await gitService.getCommitHistory(projectId, branch, 100);
+                  // Filter by windowStart and add to set
+                  branchCommits.forEach(commit => {
+                      if (commit.timestamp >= windowStart.getTime()) {
+                          commitSet.add(JSON.stringify({
+                              hash: commit.hash,
+                              author: commit.author,
+                              timestamp: commit.timestamp,
+                              message: commit.message
+                          }));
+                      }
+                  });
+              } catch (err) {
+                  // Skip if branch doesn't exist or has no commits
+              }
+          }
+          
+          // Convert back to array of objects
+          commits = Array.from(commitSet).map(s => JSON.parse(s));
+      }
+  } catch (error) {
+      console.error('Error getting git data:', error);
+      commits = [];
+      activeBranches = 0;
+  }
+
+  const mergedPrs = prs.filter(p => p.status === 'merged');
+  const openPrs = prs.filter(p => p.status === 'open');
+  let totalMergeTime = 0;
+  mergedPrs.forEach(pr => {
+      const start = new Date(pr.createdAt);
+      const end = new Date(pr.updatedAt);
+      totalMergeTime += (end - start);
+  });
+  const avgMergeTimeHours = mergedPrs.length > 0 ? (totalMergeTime / mergedPrs.length / (1000 * 60 * 60)).toFixed(1) : 0;
+  
+  // Count commits by author
+  const commitsByAuthor = {};
+  commits.forEach(commit => {
+      const author = commit.author || 'unknown';
+      commitsByAuthor[author] = (commitsByAuthor[author] || 0) + 1;
+  });
+  
+  // Build top contributors from commit activity
+  const topContributors = Object.entries(commitsByAuthor)
+      .map(([name, commits]) => ({ name, commits }))
+      .sort((a, b) => b.commits - a.commits)
+      .slice(0, 10);
+  // ------------------
 
   const activity = await Activity.find({
     projectId,
@@ -132,7 +204,7 @@ const generateInsights = asyncHandler(async (req, res) => {
       daysOverdue: isOverdue
         ? Math.floor((now - task.dueDate) / DAY_MS)
         : 0,
-      assignees: task.assignees.map((user) => user._id),
+      assignees: task.assignedTo ? [task.assignedTo._id] : [],
     };
 
     if (isOverdue) {
@@ -145,7 +217,8 @@ const generateInsights = asyncHandler(async (req, res) => {
   });
 
   openTasks.forEach((task) => {
-    task.assignees.forEach((assignee) => {
+    if (task.assignedTo) {
+      const assignee = task.assignedTo;
       const key = String(assignee._id);
       const entry = assigneeMap.get(key) || {
         userId: assignee._id,
@@ -158,7 +231,7 @@ const generateInsights = asyncHandler(async (req, res) => {
         entry.overdueTasks += 1;
       }
       assigneeMap.set(key, entry);
-    });
+    }
   });
 
   const taskCounts = {
@@ -237,6 +310,13 @@ const generateInsights = asyncHandler(async (req, res) => {
       dueSoonTasks,
       activityCounts,
       workloadByAssignee: Array.from(assigneeMap.values()),
+      topContributors,
+      codeStats: {
+        commits: commits.length,
+        activeBranches: activeBranches,
+        mergedPRs: mergedPrs.length,
+        avgMergeTimeHours: Number(avgMergeTimeHours)
+      }
     },
     ai,
   });

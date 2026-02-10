@@ -1,41 +1,62 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 
-import { getProjects } from "../services/projectService";
+import { getProject } from "../services/projectService";
 import type { Project } from "../types";
 import ChatRoom from "../components/ChatRoom";
-import TaskBoard from "../components/TaskBoard";
+import ProjectTasks from "../components/ProjectTasks";
 import FilesView from "../components/FilesView";
 import AnalyticsView from "../components/AnalyticsView";
 import AiAssistant from "../components/AiAssistant";
 import ProjectSettings from "../components/ProjectSettings";
 import PRList from "../components/PRList";
 import PRDetail from "../components/PRDetail";
+import CodeSection from "../components/CodeSection";
+import GitRepositoryBrowser from "../components/GitRepositoryBrowser";
 import { useSocket } from "../hooks/useSocket";
 import { useVideo } from "../context/VideoContext";
 
 const ProjectWorkspace = () => {
   const { projectId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [online, setOnline] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<
-    "chat" | "tasks" | "files" | "analytics" | "ai" | "settings" | "prs"
-  >("chat");
+  
+  // Tab state synced with URL/Memory
+  const [activeTab, setActiveTabState] = useState<
+    "code" | "chat" | "tasks" | "files" | "analytics" | "ai" | "settings" | "prs"
+  >("code");
+
   const [selectedPR, setSelectedPR] = useState<string | null>(null);
+
+  const setActiveTab = (tab: any) => {
+    setActiveTabState(tab);
+    setSearchParams({ tab });
+  };
+  
   const token = localStorage.getItem("token");
   const socket = useSocket(token);
   const { startCall, joinCall, activeProjectCalls } = useVideo();
 
+  // Sync with URL params on mount
+  useEffect(() => {
+      const tab = searchParams.get("tab");
+      const prId = searchParams.get("prId");
+      if(tab) setActiveTabState(tab as any);
+      if(prId && tab === 'prs') setSelectedPR(prId);
+  }, [searchParams]);
+
   useEffect(() => {
     const loadProject = async () => {
       try {
-        const projects = await getProjects();
-        // Fallback for demo if ID doesn't match db
-        const selected = projects.find((item) => item._id === projectId) || projects[0];
-        setProject(selected);
+        if (!projectId) return;
+        const data = await getProject(projectId);
+        setProject(data);
       } catch (err) {
-        console.error(err);
+        console.error("Failed to load project", err);
+        // On error (e.g. 403 or 404), maybe redirect to dashboard?
+        // navigate("/dashboard");
       }
     };
 
@@ -82,6 +103,9 @@ const ProjectWorkspace = () => {
   }
 
   const tabs = [
+    { id: 'code', label: 'Code', icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+    )},
     { id: 'chat', label: 'Chat', icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
     )},
@@ -180,17 +204,33 @@ const ProjectWorkspace = () => {
          ))}
       </div>
 
-      {/* Content Area */}        {activeTab === 'prs' && (
-           selectedPR ? 
-            <PRDetail project={project} prId={selectedPR} onBack={() => setSelectedPR(null)} /> : 
-            <PRList project={project} onSelect={setSelectedPR} />
-        )}      <main className="flex-1 overflow-hidden relative bg-[#050505]">
+      {/* Content Area */}
+      <main className="flex-1 overflow-hidden relative bg-[#050505]">
+          {activeTab === 'code' && <GitRepositoryBrowser projectId={project._id} />}
           {activeTab === 'chat' && <ChatRoom project={project} />}
-          {activeTab === 'tasks' && <TaskBoard project={project} />}
+          {activeTab === 'tasks' && <ProjectTasks project={project} />}
           {activeTab === 'files' && <FilesView project={project} />}
           {activeTab === 'analytics' && <AnalyticsView project={project} />}
           {activeTab === 'ai' && <AiAssistant project={project} />}
           {activeTab === 'settings' && <ProjectSettings project={project} />}
+          {activeTab === 'prs' && (
+             selectedPR ? 
+              <PRDetail 
+                project={project} 
+                prId={selectedPR} 
+                onBack={() => {
+                    setSelectedPR(null);
+                    setSearchParams({ tab: 'prs' });
+                }} 
+              /> : 
+              <PRList 
+                project={project} 
+                onSelect={(id) => {
+                    setSelectedPR(id);
+                    setSearchParams({ tab: 'prs', prId: id });
+                }} 
+              />
+          )}
       </main>
     </div>
   );

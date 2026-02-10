@@ -1,6 +1,7 @@
+import { Navigate, Route, Routes, useParams, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
-
+import { getPullRequestById } from "./services/prService";
 import { useAuth } from "./hooks/useAuth";
 import TopBar from "./components/TopBar";
 import Landing from "./pages/Landing";
@@ -38,6 +39,34 @@ const ProtectedRoute = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
+// Redirector for PR deep links
+const PrRedirect = () => {
+    const { prId } = useParams();
+    const navigate = useNavigate();
+    
+    useEffect(() => {
+        const resolve = async () => {
+            try {
+                if(!prId) return;
+                const pr = await getPullRequestById(prId);
+                navigate(`/project/${pr.projectId}?tab=prs&prId=${prId}`, { replace: true });
+            } catch(e) {
+                console.error(e);
+                navigate('/dashboard');
+            }
+        };
+        resolve();
+    }, [prId, navigate]);
+
+    return <div className="p-10 text-center text-gray-500">Resolving PR location...</div>;
+};
+
+// Redirector for Pull Request List route
+const PrListRedirect = () => {
+    const { projectId } = useParams();
+    return <Navigate to={`/project/${projectId}?tab=prs`} replace />;
+}
+
 function App() {
   return (
     <Routes>
@@ -59,6 +88,28 @@ function App() {
               <Dashboard />
             </ProtectedLayout>
           </ProtectedRoute>
+        }
+      />
+      {/* Route for direct project PR list access */}
+      <Route 
+        path="/project/:projectId/pull-requests"
+        element={
+            <ProtectedRoute>
+                <ProtectedLayout>
+                    <PrListRedirect />
+                </ProtectedLayout>
+            </ProtectedRoute>
+        }
+      />
+      {/* Route for direct PR deep link */}
+      <Route
+        path="/pr/:prId"
+        element={
+            <ProtectedRoute>
+                <ProtectedLayout>
+                    <PrRedirect />
+                </ProtectedLayout>
+            </ProtectedRoute>
         }
       />
       <Route

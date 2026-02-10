@@ -83,6 +83,13 @@ const insightSchema = new mongoose.Schema(
           overdueTasks: { type: Number, default: 0 },
         },
       ],
+      codeStats: {
+          mergedPrCount: { type: Number, default: 0 },
+          openPrCount: { type: Number, default: 0 },
+          avgMergeTimeHours: { type: Number, default: 0 },
+          commitCount: { type: Number, default: 0 },
+          commitsByAuthor: { type: Object, default: {} }
+      },
     },
     ai: {
       priorityRecommendations: [

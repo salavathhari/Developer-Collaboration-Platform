@@ -13,6 +13,16 @@ const notificationSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    message: {
+      type: String,
+      required: true, 
+      trim: true
+    },
+    referenceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true
+    },
     projectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Project",

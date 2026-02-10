@@ -41,6 +41,27 @@ const getMyProjects = asyncHandler(async (req, res) => {
   return res.status(200).json({ projects });
 });
 
+const getProjectById = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const project = await Project.findById(projectId)
+    .populate("owner", "name email avatar")
+    .populate("members.user", "name email avatar role");
+
+  if (!project) {
+    throw new ApiError(404, "Project not found");
+  }
+
+  const isMember = project.members.some(
+    (member) => String(member.user._id) === req.user.id
+  ) || String(project.owner._id) === req.user.id;
+
+  if (!isMember) {
+    throw new ApiError(403, "You do not have access to this project");
+  }
+
+  return res.status(200).json({ project });
+});
+
 const inviteMember = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const { project } = req;
@@ -198,7 +219,9 @@ const acceptInvite = asyncHandler(async (req, res) => {
   const notification = await createNotification({
     userId: invite.inviterId,
     type: "invite_accepted",
+    message: `${req.user.name} accepted your invite to ${project.name}`,
     projectId: project.id,
+    referenceId: project._id,
     payload: { projectId: project.id, userId: req.user.id },
   });
   emitNotification(io, notification);
@@ -245,6 +268,7 @@ const deleteProject = asyncHandler(async (req, res) => {
 module.exports = {
   createProject,
   getMyProjects,
+  getProjectById,
   inviteMember,
   createInviteLink,
   acceptInvite,

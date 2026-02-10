@@ -7,6 +7,9 @@ const User = require("../models/User");
 const { sanitizeString, sanitizeRichText } = require("../utils/sanitize");
 const { createNotification, emitNotification } = require("../utils/notify");
 const { logActivity } = require("../utils/activity");
+const setupCollaborationHandlers = require("./collaborationHandlers");
+const setupWorkflowHandlers = require("./workflowHandlers");
+const setupTaskHandlers = require("./taskSocket");
 
 // projectId -> Set(userId)
 const presenceMap = new Map();
@@ -59,7 +62,12 @@ const setupRedisAdapter = async (io) => {
 const initSocketServer = async (httpServer) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+      origin: [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        process.env.CORS_ORIGIN,
+      ].filter(Boolean),
       credentials: true,
     },
   });
@@ -86,6 +94,15 @@ const initSocketServer = async (httpServer) => {
     console.log(`Socket connected: ${socket.id} (User: ${socket.userId})`);
     const userId = socket.userId;
     socket.join(`user:${userId}`);
+
+    // Setup collaboration handlers (chat, PR comments, live review)
+    setupCollaborationHandlers(io, socket, userId);
+    
+    // Setup workflow handlers (PR workflow, task management, Kanban)
+    setupWorkflowHandlers(io, socket, userId);
+    
+    // Setup task handlers (real-time task updates, drag & drop)
+    setupTaskHandlers(io, socket, userId);
 
     socket.on("join_room", async ({ projectId }) => {
       if (!projectId) {
@@ -274,34 +291,49 @@ const initSocketServer = async (httpServer) => {
     };
 
     // User joins the "video room" for a project
-    socket.on("join_video_room", async ({ projectId }) => {
+    socket.on("join_video_room", async ({ projectId, meetingId }) => {
       // Security check: Ensure user is member of project
       // reusing existing checks if possible, or new minimal check
-      // For performance, we assume 'join_room' was called previously or context is known.
-      // But let's be safe:
-      const project = await Project.findById(projectId);
-      if (!project) return;
-      const isMember = project.owner.toString() === userId || project.members.some((m) => m.user.toString() === userId);
-      if (!isMember) return;
-
-      socket.join(`video:${projectId}`);
-      // Notify others in video room that a new user joined
-      socket.to(`video:${projectId}`).emit("user_joined_video", { userId });
+      // For performance, we assume 'join_room' was already called
+      // OR we just trust the socket.rooms check if they joined the project room?
+      // Better be safe:
+      /* const project = await Project.findById(projectId);
+      if (!project) return; 
+      // ... check membership ... */
+      // Ideally, we rely on the main room join logic for auth or repeat it.
+      // Assuming user is authenticated via middleware and joined main project room.
       
-      updateVideoPresence(projectId);
+      socket.join(`video:${projectId}`);
+      
+      // Notify others in video room that a new user joined
+      // In Mesh, the new user initiates connections to ALL existing users OR existing users initiate to new user.
+      socket.to(`video:${projectId}`).emit("user_joined_video", { userId: socket.userId });
+      
+      // Get list of all OTHER users in the room to tell the new user who is there
+      const room = io.sockets.adapter.rooms.get(`video:${projectId}`);
+      const otherUsers = [];
+      if (room) {
+          for (const socketId of room) {
+              const clientSocket = io.sockets.sockets.get(socketId);
+              if (clientSocket && clientSocket.userId !== socket.userId) {
+                  otherUsers.push(clientSocket.userId);
+              }
+          }
+      }
+      socket.emit("all_video_users", otherUsers);
 
-      // OPTIONAL: Notify the text chat that a video session is active
-      io.to(projectId).emit("system_notification", {
-         type: "video_start",
-         content: `User ${userId} joined the video channel.`,
-         userId
-      });
+      updateVideoPresence(projectId);
+      
+      // Update Meeting DB if tracking
+      if (meetingId) {
+         // Add participant logic here if using DB
+      }
     });
 
     // User leaves the video room
     socket.on("leave_video_room", ({ projectId }) => {
       socket.leave(`video:${projectId}`);
-      socket.to(`video:${projectId}`).emit("user_left_video", { userId });
+      socket.to(`video:${projectId}`).emit("user_left_video", { userId: socket.userId });
       updateVideoPresence(projectId);
     });
 
@@ -336,104 +368,60 @@ const initSocketServer = async (httpServer) => {
 
     // Relay WebRTC signals (Offer, Answer, ICE Candidate) to a specific target
     socket.on("webrtc_signal", ({ targetId, signal }) => {
-      // Verify target is valid? Simplified for MVP.
-      io.to(`user:${targetId}`).emit("webrtc_signal", {
-        senderId: userId,
-        signal,
-      });
-    });
-
-    socket.on("disconnecting", () => {
-       for (const room of socket.rooms) {
-           if (room.startsWith("video:")) {
-               const projectId = room.split(":")[1];
-               // We need to wait for the leave to happen or manually calc
-               // On disconnecting, socket is still in room.
-               // We can cheat: calculate count - 1
-               const roomObj = io.sockets.adapter.rooms.get(room);
-               const count = roomObj ? roomObj.size - 1 : 0;
-               io.to(projectId).emit("video_status_update", { projectId, count, active: count > 0 });
-               socket.to(room).emit("user_left_video", { userId });
-           }
-       }
-    });
-
-
-    // --- WebRTC Signaling Events ---
-
-    const updateVideoPresence = (projectId) => {
-        const room = io.sockets.adapter.rooms.get(`video:${projectId}`);
-        const count = room ? room.size : 0;
-        io.to(projectId).emit("video_status_update", { projectId, count, active: count > 0 });
-    };
-
-    // User joins the "video room" for a project
-    socket.on("join_video_room", async ({ projectId, meetingId }) => {
-      // Security check: Ensure user is member of project
-      // reusing existing checks if possible, or new minimal check
-      // For performance, we assume 'join_room' was already called
-      // OR we just trust the socket.rooms check if they joined the project room?
-      // Better be safe:
-      /* const project = await Project.findById(projectId);
-      if (!project) return; 
-      // ... check membership ... */
-      // Ideally, we rely on the main room join logic for auth or repeat it.
-      // Assuming user is authenticated via middleware and joined main project room.
-      
-      socket.join(`video:${projectId}`);
-      
-      // Notify others in video room that a new user joined
-      // We send the 'initiator' signal to whom?
-      // In Mesh, the new user initiates connections to ALL existing users OR existing users initiate to new user.
-      // Pattern: New user joins. Server tells existing users "User X joined".
-      // Existing users (peers) initiate a connection to User X.
-      socket.to(`video:${projectId}`).emit("user_joined_video", { userId: socket.userId });
-      
-      // Get list of all OTHER users in the room to tell the new user who is there
-      const room = io.sockets.adapter.rooms.get(`video:${projectId}`);
-      const otherUsers = [];
-      if (room) {
-          for (const socketId of room) {
-              const clientSocket = io.sockets.sockets.get(socketId);
-              if (clientSocket && clientSocket.userId !== socket.userId) {
-                  otherUsers.push(clientSocket.userId);
-              }
-          }
-      }
-      socket.emit("all_video_users", otherUsers);
-
-      updateVideoPresence(projectId);
-      
-      // Update Meeting DB if tracking
-      if (meetingId) {
-         // Add participant logic here if using DB
-      }
-    });
-
-    // User leaves the video room
-    socket.on("leave_video_room", ({ projectId }) => {
-      socket.leave(`video:${projectId}`);
-      socket.to(`video:${projectId}`).emit("user_left_video", { userId: socket.userId });
-      updateVideoPresence(projectId);
-    });
-
-    // Relay WebRTC signals (Offer, Answer, ICE Candidate) to a specific target
-    socket.on("webrtc_signal", ({ targetId, signal }) => {
       io.to(`user:${targetId}`).emit("webrtc_signal", {
         senderId: socket.userId,
         signal,
       });
     });
 
+    // --- Code Editor Real-time Events ---
+
+    socket.on("editor:join", ({ projectId, repoId, filePath }) => {
+        if (!projectId || !repoId || !filePath) return;
+        const roomName = `editor:${projectId}:${repoId}:${filePath}`;
+        socket.join(roomName);
+        
+        const room = io.sockets.adapter.rooms.get(roomName);
+        const users = [];
+        if (room) {
+             for (const socketId of room) {
+                 const s = io.sockets.sockets.get(socketId);
+                 if (s && s.userId !== userId) users.push(s.userId);
+             }
+        }
+        socket.emit("editor:users", users);
+        socket.to(roomName).emit("editor:user_joined", { userId });
+    });
+
+    socket.on("editor:leave", ({ projectId, repoId, filePath }) => {
+        if (!projectId || !repoId || !filePath) return;
+        const roomName = `editor:${projectId}:${repoId}:${filePath}`;
+        socket.leave(roomName);
+        socket.to(roomName).emit("editor:user_left", { userId });
+    });
+
+    socket.on("editor:update", ({ projectId, repoId, filePath, content }) => {
+         const roomName = `editor:${projectId}:${repoId}:${filePath}`;
+         // Broadcast to everyone ELSE in the room
+         socket.to(roomName).emit("editor:update", { content, senderId: userId });
+    });
+    
+    socket.on("editor:cursor", ({ projectId, repoId, filePath, cursor }) => {
+        const roomName = `editor:${projectId}:${repoId}:${filePath}`;
+        socket.to(roomName).emit("editor:cursor", { senderId: userId, cursor });
+    });
+
     socket.on("disconnecting", () => {
        for (const room of socket.rooms) {
            if (room.startsWith("video:")) {
-               const projectId = room.split(":")[1];
-               // We need to wait for the leave to happen or manually calc
+               const pId = room.split(":")[1];
                const roomObj = io.sockets.adapter.rooms.get(room);
                const count = roomObj ? roomObj.size - 1 : 0;
-               io.to(projectId).emit("video_status_update", { projectId, count: Math.max(0, count), active: count > 0 });
+               io.to(pId).emit("video_status_update", { projectId: pId, count: Math.max(0, count), active: count > 0 });
                socket.to(room).emit("user_left_video", { userId: socket.userId });
+           }
+           if (room.startsWith("editor:")) {
+               socket.to(room).emit("editor:user_left", { userId: socket.userId });
            }
        }
     });

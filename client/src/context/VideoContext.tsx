@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, type ReactNode, useEffect } from "react";
 import VideoCall from "../components/VideoCall";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
@@ -18,9 +18,9 @@ export const VideoProvider = ({ children }: { children: ReactNode }) => {
   const [activeCall, setActiveCall] = useState<{ projectId: string; meetingId?: string } | null>(null);
   const [activeProjectCalls, setActiveProjectCalls] = useState<Record<string, boolean>>({});
   
-  const token = localStorage.getItem("token");
+  const { user, loading } = useAuth();
+  const token = !loading && user ? localStorage.getItem("token") : null;
   const socket = useSocket(token);
-  const { user } = useAuth(); // Assuming useAuth exists and provides user info
 
   useEffect(() => {
     if (!socket) return;

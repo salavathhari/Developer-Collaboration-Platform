@@ -5,6 +5,7 @@ import type { Message, Project } from "../types";
 import { getMessages } from "../services/messageService";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
+import { useVideo } from "../context/VideoContext";
 import VideoCall from "./VideoCall";
 import PresenceBar from "./PresenceBar";
 
@@ -12,6 +13,7 @@ const ChatRoom = ({ project }: { project: Project }) => {
   const { user } = useAuth();
   const token = localStorage.getItem("token");
   const socket = useSocket(token);
+  const { activeCall } = useVideo();
   const [messages, setMessages] = useState<Message[]>([]);
   const [content, setContent] = useState("");
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -114,7 +116,12 @@ const ChatRoom = ({ project }: { project: Project }) => {
 
   return (
     <div className="flex flex-col h-[calc(100vh-180px)] relative bg-[#050505] rounded-xl border border-gray-800 shadow-2xl overflow-hidden">
-      <VideoCall projectId={projectId} ownerId={typeof ownerId === 'string' ? ownerId : (ownerId as any)?.id || (ownerId as any)?._id} />
+      {/* Video Call Overlay - Only show when active call exists for this project */}
+      {activeCall?.projectId === projectId && (
+        <div className="absolute inset-0 z-50 bg-gray-950">
+          <VideoCall projectId={projectId} onClose={() => {}} />
+        </div>
+      )}
       
       <PresenceBar 
         members={project.members.map(m => m.user)} 

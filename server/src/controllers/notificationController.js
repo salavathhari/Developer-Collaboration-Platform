@@ -26,7 +26,17 @@ const markNotificationRead = asyncHandler(async (req, res) => {
   return res.status(200).json({ notification });
 });
 
+const markAllNotificationsRead = asyncHandler(async (req, res) => {
+  await Notification.updateMany(
+    { userId: req.user.id, read: false },
+    { read: true }
+  );
+  
+  return res.status(200).json({ success: true });
+});
+
 module.exports = {
   getNotifications,
   markNotificationRead,
+  markAllNotificationsRead
 };

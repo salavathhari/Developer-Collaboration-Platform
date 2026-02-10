@@ -1,10 +1,12 @@
 const Notification = require("../models/Notification");
 
-const createNotification = async ({ userId, type, projectId, payload }) => {
+const createNotification = async ({ userId, type, message, projectId, referenceId, payload }) => {
   const notification = await Notification.create({
     userId,
     type,
+    message: message || "New notification",
     projectId: projectId || null,
+    referenceId: referenceId || null,
     payload: payload || {},
   });
 

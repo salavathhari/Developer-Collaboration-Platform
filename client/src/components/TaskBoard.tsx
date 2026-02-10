@@ -1,311 +1,322 @@
-import { useEffect, useState, useCallback } from "react";
-import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import type { DropResult } from "@hello-pangea/dnd";
-import type { Project, Task, Column as ColumnType, User } from "../types";
-import { getTasks, createTask, updateTask, deleteTask, reorderTasks } from "../services/taskService";
-import { getColumns, createColumn, deleteColumn } from "../services/columnService";
-import { useSocket } from "../hooks/useSocket";
-import { useVideo } from "../context/VideoContext";
+import React, { useState, useEffect, useMemo } from 'react';
+import { DragDropContext, type DropResult } from '@hello-pangea/dnd';
+import type { Task } from '../types';
+import { taskService } from '../services/taskService';
+import { useTasksSocket } from '../hooks/useTasksSocket';
+import Column from './Column';
+import TaskModal from './TaskModal';
+import CreateTaskModal from './CreateTaskModal';
+import TaskFilters from './TaskFilters';
+import { Plus, Filter, BarChart3 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
-const TaskBoard = ({ project }: { project: Project }) => {
-  const [columns, setColumns] = useState<ColumnType[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [isAddingColumn, setIsAddingColumn] = useState(false);
-  const [newColumnName, setNewColumnName] = useState("");
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [addingTaskToColumn, setAddingTaskToColumn] = useState<string | null>(null);
+const COLUMNS = {
+  todo: { title: 'To Do', color: 'bg-gray-50 dark:bg-[#161b22]' },
+  in_progress: { title: 'In Progress', color: 'bg-blue-50/50 dark:bg-blue-900/10' },
+  review: { title: 'Review', color: 'bg-yellow-50/50 dark:bg-yellow-900/10' },
+  blocked: { title: 'Blocked', color: 'bg-red-50/50 dark:bg-red-900/10' },
+  done: { title: 'Done', color: 'bg-green-50/50 dark:bg-green-900/10' },
+};
 
-  const token = localStorage.getItem("token");
-  const socket = useSocket(token);
-  const { startCall } = useVideo();
+interface TaskBoardProps {
+  projectId: string;
+  initialTasks?: Task[];
+  onRefresh?: () => void;
+}
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [colsData, tasksData] = await Promise.all([
-        getColumns(project._id),
-        getTasks(project._id)
-      ]);
-      setColumns(colsData);
-      setTasks(tasksData);
-    } catch (err) {
-      console.error(err);
-    }
-  }, [project._id]);
+const TaskBoard: React.FC<TaskBoardProps> = ({ projectId, initialTasks }) => {
+  const [tasks, setTasks] = useState<Task[]>(initialTasks ?? []);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [createModalStatus, setCreateModalStatus] = useState<string>('todo');
+  const [filters, setFilters] = useState({
+    search: '',
+    priority: [] as string[],
+    assignee: null as string | null,
+    labels: [] as string[],
+  });
 
+  // Sync with parent's task list
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    setTasks(initialTasks ?? []);
+  }, [initialTasks]);
 
-  useEffect(() => {
-    if (!socket) return;
-    const handleReorder = () => {
-        fetchData(); 
+  // Socket integration for real-time updates
+  useTasksSocket({
+    projectId,
+    onTaskCreated: (task) => {
+      setTasks((prev) => [...prev, task]);
+      toast.success(`New task created: ${task.title}`);
+    },
+    onTaskUpdated: ({ task, changedFields }) => {
+      setTasks((prev) => prev.map((t) => (t._id === task._id ? task : t)));
+      // Update selected task if it's the one being viewed
+      if (selectedTask && selectedTask._id === task._id) {
+        setSelectedTask(task);
+      }
+    },
+    onTaskMoved: ({ task }) => {
+      setTasks((prev) => prev.map((t) => (t._id === task._id ? task : t)));
+    },
+    onTaskDeleted: ({ taskId }) => {
+      setTasks((prev) => prev.filter((t) => t._id !== taskId));
+      if (selectedTask && selectedTask._id === taskId) {
+        setSelectedTask(null);
+      }
+      toast.success('Task deleted');
+    },
+    onTaskComment: ({ taskId }) => {
+      // Refresh the specific task to get new comment count
+      // Note: getTask doesn't exist in current API, task updates come via socket
+      // if (selectedTask && selectedTask._id === taskId) {
+      //   taskService.getTask(projectId, taskId).then((task) => {
+      //     setSelectedTask(task);
+      //     setTasks((prev) => prev.map((t) => (t._id === taskId ? task : t)));
+      //   });
+      // }
+    },
+  });
+
+  // Filter and organize tasks
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      // Search filter
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        if (
+          !task.title.toLowerCase().includes(searchLower) &&
+          !task.description?.toLowerCase().includes(searchLower)
+        ) {
+          return false;
+        }
+      }
+
+      // Priority filter
+      if (filters.priority.length > 0 && !filters.priority.includes(task.priority)) {
+        return false;
+      }
+
+      // Assignee filter
+      if (filters.assignee) {
+        const hasAssignee = task.assignees?.some(
+          (a: any) => a._id === filters.assignee || a === filters.assignee
+        );
+        if (!hasAssignee) return false;
+      }
+
+      // Labels filter
+      if (filters.labels.length > 0) {
+        const hasLabel = filters.labels.some((label) => task.labels?.includes(label));
+        if (!hasLabel) return false;
+      }
+
+      return true;
+    });
+  }, [tasks, filters]);
+
+  // Organize tasks by column
+  const columns = useMemo(() => {
+    const cols: Record<string, Task[]> = {
+      todo: [],
+      in_progress: [],
+      review: [],
+      blocked: [],
+      done: [],
     };
-    
-    socket.on("tasks_reordered", handleReorder);
-    socket.on("task_created", fetchData);
-    socket.on("task_updated", fetchData);
-    socket.on("task_deleted", fetchData);
 
-    return () => {
-        socket.off("tasks_reordered", handleReorder);
-        socket.off("task_created", fetchData);
-        socket.off("task_updated", fetchData);
-        socket.off("task_deleted", fetchData);
-    };
-  }, [socket, fetchData]);
+    filteredTasks.forEach((task) => {
+      const status = task.status in cols ? task.status : 'todo';
+      cols[status].push(task);
+    });
 
+    // Sort by orderKey
+    Object.keys(cols).forEach((key) => {
+      cols[key].sort((a, b) => (a.orderKey || 0) - (b.orderKey || 0));
+    });
+
+    return cols;
+  }, [filteredTasks]);
+
+  // Handle drag and drop
   const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
 
     if (!destination) return;
-    if (
-      destination.droppableId === source.droppableId &&
-      destination.index === source.index
-    ) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index)
+      return;
 
-    const changingTask = tasks.find(t => t._id === draggableId);
-    if (!changingTask) return;
+    const sourceColTasks = [...columns[source.droppableId]];
+    const destColTasks =
+      source.droppableId === destination.droppableId
+        ? sourceColTasks
+        : [...columns[destination.droppableId]];
 
-    // Optimistic Update
-    const allTasks = Array.from(tasks);
-    
-    // Sort tasks in the destination column
-    const destColId = destination.droppableId;
-    const destTasks = allTasks
-        .filter(t => (t.columnId) === destColId && t._id !== draggableId)
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const [movedTask] = sourceColTasks.splice(source.index, 1);
 
-    // Insert the draggable
-    destTasks.splice(destination.index, 0, { ...changingTask, columnId: destColId } as Task);
-    
-    // Recalculate orders for destination column
-    const updates = destTasks.map((t, index) => ({
-        ...t,
-        order: index,
-        columnId: destColId
-    }));
+    // Calculate new orderKey
+    let newOrderKey: number;
+    if (destination.index === 0) {
+      newOrderKey = destColTasks.length > 0 ? destColTasks[0].orderKey! - 1000 : 1000;
+    } else if (destination.index >= destColTasks.length) {
+      newOrderKey =
+        destColTasks.length > 0
+          ? destColTasks[destColTasks.length - 1].orderKey! + 1000
+          : 1000;
+    } else {
+      const prev = destColTasks[destination.index - 1];
+      const next = destColTasks[destination.index];
+      newOrderKey = Math.floor((prev.orderKey! + next.orderKey!) / 2);
+    }
 
-    // Update local state: Replace changed tasks
-    const otherTasks = allTasks.filter(t => !updates.find(u => u._id === t._id) && t._id !== draggableId);
-    setTasks([...otherTasks, ...updates]);
+    // Optimistic update
+    const updatedTask = {
+      ...movedTask,
+      status: destination.droppableId as any,
+      orderKey: newOrderKey,
+    };
 
-    // Send payload
-    const apiPayload = updates.map(t => ({
-        _id: t._id,
-        order: t.order,
-        columnId: t.columnId,
-        status: t.status 
-    }));
+    if (source.droppableId === destination.droppableId) {
+      sourceColTasks.splice(destination.index, 0, updatedTask);
+    } else {
+      destColTasks.splice(destination.index, 0, updatedTask);
+    }
 
+    // Update local state immediately for smooth UX
+    setTasks((prev) => prev.map((t) => (t._id === draggableId ? updatedTask : t)));
+
+    // Call API
     try {
-        await reorderTasks(project._id, apiPayload);
-    } catch (err) {
-        console.error("Failed to reorder", err);
-        fetchData(); 
+      await taskService.moveTask(projectId, draggableId, {
+        toStatus: destination.droppableId as any,
+        toOrderKey: newOrderKey,
+        fromStatus: source.droppableId,
+      });
+    } catch (error: any) {
+      console.error('Failed to move task:', error);
+      toast.error(error.message || 'Failed to move task');
+      // Revert on error
+      setTasks((prev) => prev.map((t) => (t._id === draggableId ? movedTask : t)));
     }
   };
 
-  const handleAddColumn = async () => {
-    if (!newColumnName.trim()) return;
-    try {
-        const col = await createColumn(project._id, newColumnName);
-        setColumns([...columns, col]);
-        setNewColumnName("");
-        setIsAddingColumn(false);
-    } catch (err) {
-        console.error(err);
-    }
+  // Handlers
+  const handleTaskClick = (task: Task) => {
+    setSelectedTask(task);
   };
 
-  const handleAddTask = async (columnId: string) => {
-    if (!newTaskTitle.trim()) return;
-    try {
-        // Find max order in col
-        const colTasks = tasks.filter(t => t.columnId === columnId);
-        const maxOrder = Math.max(...colTasks.map(t => t.order || 0), -1);
-
-        await createTask(project._id, {
-            title: newTaskTitle,
-            columnId,
-            order: maxOrder + 1,
-            projectId: project._id,
-            type: 'task'
-        });
-        setNewTaskTitle("");
-        setAddingTaskToColumn(null);
-    } catch (err) {
-        console.error(err);
-    }
+  const handleQuickAdd = (status: string) => {
+    setCreateModalStatus(status);
+    setIsCreateModalOpen(true);
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-      if(!confirm("Are you sure?")) return;
-      await deleteTask(project._id, taskId);
+  const handleTaskCreated = (task: Task) => {
+    setTasks((prev) => [...prev, task]);
+    setIsCreateModalOpen(false);
   };
 
-  const handleDeleteColumn = async (colId: string) => {
-      if(!confirm("Delete column?")) return;
-      try {
-        await deleteColumn(colId);
-        setColumns(columns.filter(c => c._id !== colId));
-      } catch(err) {
-          alert("Cannot delete column with tasks");
-      }
+  const handleTaskUpdated = (task: Task) => {
+    setTasks((prev) => prev.map((t) => (t._id === task._id ? task : t)));
+    setSelectedTask(task);
   };
 
-  // Group tasks for rendering
-  const tasksByColumn: Record<string, Task[]> = {};
-  columns.forEach(c => {
-      tasksByColumn[c._id] = tasks
-        .filter(t => t.columnId === c._id)
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
-  });
+  const handleTaskDeleted = (taskId: string) => {
+    setTasks((prev) => prev.filter((t) => t._id !== taskId));
+    setSelectedTask(null);
+  };
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const completed = tasks.filter((t) => t.status === 'done').length;
+    const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return { total, completed, inProgress, completionRate };
+  }, [tasks]);
 
   return (
-    <div className="h-full flex flex-col bg-[#050505] overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-[#050505]">
-            <h2 className="text-xl font-bold text-white">Board</h2>
-            <button 
-                onClick={() => setIsAddingColumn(true)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+    <div className="flex flex-col h-full">
+      {/* Header with Stats and Actions */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#0d1117]">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Tasks</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {stats.total} total • {stats.inProgress} in progress • {stats.completed} completed (
+              {stats.completionRate}%)
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+              className={`px-3 py-2 rounded-lg border transition-colors flex items-center gap-2 ${
+                isFiltersOpen
+                  ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }`}
             >
-                + Add Column
+              <Filter className="w-4 h-4" />
+              Filters
             </button>
+
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Task
+            </button>
+          </div>
         </div>
 
-        {isAddingColumn && (
-              <div className="px-6 py-3 bg-[#0d1017] border-b border-gray-800 flex items-center gap-2">
-                  <input 
-                    autoFocus
-                    value={newColumnName} 
-                    onChange={e => setNewColumnName(e.target.value)}
-                    placeholder="Column Name (e.g. Todo)"
-                    className="bg-[#050505] border border-gray-700 text-white px-3 py-1.5 rounded-md text-sm outline-none focus:border-indigo-500"
-                    onKeyDown={e => e.key === 'Enter' && handleAddColumn()}
-                  />
-                  <button onClick={handleAddColumn} className="text-indigo-400 hover:text-indigo-300 text-sm font-bold">Save</button>
-                  <button onClick={() => setIsAddingColumn(false)} className="text-gray-500 hover:text-gray-400 text-sm">Cancel</button>
-              </div>
+        {/* Filters Panel */}
+        {isFiltersOpen && (
+          <TaskFilters filters={filters} onFiltersChange={setFilters} projectId={projectId} />
         )}
+      </div>
 
-        <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex-1 overflow-x-auto overflow-y-hidden">
-                <div className="h-full flex px-6 py-6 gap-6 min-w-max">
-                    {columns.map(column => (
-                        <div key={column._id} className="w-80 flex flex-col bg-[#0d1017] rounded-xl border border-gray-800 max-h-full">
-                            {/* Column Header */}
-                            <div className="p-4 border-b border-gray-800 flex justify-between items-center group">
-                                <h3 className="font-bold text-gray-200">{column.name}</h3>
-                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <span className="text-xs text-gray-500 font-mono">{tasksByColumn[column._id]?.length || 0}</span>
-                                    <button onClick={() => handleDeleteColumn(column._id)} className="text-gray-600 hover:text-red-400">
-                                        &times;
-                                    </button>
-                                </div>
-                            </div>
+      {/* Kanban Board */}
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="flex-1 overflow-x-auto overflow-y-hidden">
+          <div className="flex h-full gap-4 p-4 items-start min-w-max">
+            {Object.entries(COLUMNS).map(([colId, colDef]) => (
+              <Column
+                key={colId}
+                columnId={colId}
+                title={colDef.title}
+                tasks={columns[colId]}
+                count={columns[colId].length}
+                onTaskClick={handleTaskClick}
+                onQuickAdd={() => handleQuickAdd(colId)}
+                color={colDef.color}
+              />
+            ))}
+          </div>
+        </div>
+      </DragDropContext>
 
-                            {/* Column Body */}
-                            <Droppable droppableId={column._id}>
-                                {(provided, snapshot) => (
-                                    <div
-                                        ref={provided.innerRef}
-                                        {...provided.droppableProps}
-                                        className={`flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin scrollbar-thumb-gray-700 ${snapshot.isDraggingOver ? 'bg-gray-800/30' : ''}`}
-                                        style={{ minHeight: '100px' }}
-                                    >
-                                        {tasksByColumn[column._id]?.map((task, index) => (
-                                            <Draggable key={task._id} draggableId={task._id} index={index}>
-                                                {(provided, snapshot) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.draggableProps}
-                                                        {...provided.dragHandleProps}
-                                                        className={`bg-[#161b22] border border-gray-700 p-3 rounded-lg shadow-sm group hover:border-gray-500 transition-colors ${snapshot.isDragging ? 'rotate-2 shadow-xl ring-2 ring-indigo-500/50 z-50' : ''}`}
-                                                    >
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono uppercase ${
-                                                                task.type === 'bug' ? 'bg-red-500/10 text-red-400' : 
-                                                                task.type === 'feature' ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400'
-                                                            }`}>{task.type || 'task'}</span>
-                                                            <button 
-                                                                onClick={() => handleDeleteTask(task._id)}
-                                                                className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100"
-                                                            >
-                                                                &times;
-                                                            </button>
-                                                        </div>
-                                                        <p className="text-sm text-gray-200 font-medium mb-2">{task.title}</p>
-                                                        <div className="flex items-center justify-between mt-3">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="flex -space-x-1">
-                                                                    {task.assignees?.slice(0, 3).map((u, i) => (
-                                                                        <div key={i} className="w-5 h-5 rounded-full bg-gray-700 border border-[#161b22] flex items-center justify-center text-[8px] text-white">
-                                                                            {u.name?.[0]}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                                <button 
-                                                                    onClick={() => startCall(project._id, 'task', task._id)}
-                                                                    className="text-gray-500 hover:text-green-500 transition-colors p-1 rounded hover:bg-gray-800"
-                                                                    title="Discuss via Video"
-                                                                >
-                                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                                                                </button>
-                                                            </div>
-                                                            {task.priority && (
-                                                                <span className={`w-2 h-2 rounded-full ${
-                                                                    task.priority === 'high' ? 'bg-red-500' :
-                                                                    task.priority === 'medium' ? 'bg-orange-400' : 'bg-blue-400'
-                                                                }`} title={`Priority: ${task.priority}`} />
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </Draggable>
-                                        ))}
-                                        {provided.placeholder}
-                                    </div>
-                                )}
-                            </Droppable>
+      {/* Task Detail Modal */}
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask}
+          projectId={projectId}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={handleTaskUpdated}
+          onDelete={handleTaskDeleted}
+        />
+      )}
 
-                            {/* Add Task Input */}
-                            <div className="p-3 pt-0 bg-[#0d1017] rounded-b-xl">
-                                {addingTaskToColumn === column._id ? (
-                                    <div className="bg-[#161b22] border border-indigo-500/50 p-2 rounded-lg">
-                                        <textarea 
-                                            autoFocus
-                                            className="w-full bg-transparent text-sm text-white placeholder-gray-600 outline-none resize-none"
-                                            placeholder="Enter task title..."
-                                            rows={2}
-                                            value={newTaskTitle}
-                                            onChange={e => setNewTaskTitle(e.target.value)}
-                                            onKeyDown={e => {
-                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    handleAddTask(column._id);
-                                                }
-                                            }}
-                                        />
-                                        <div className="flex justify-end gap-2 mt-2">
-                                            <button onClick={() => setAddingTaskToColumn(null)} className="text-xs text-gray-500 hover:text-white">Cancel</button>
-                                            <button onClick={() => handleAddTask(column._id)} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded">Add</button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <button 
-                                        onClick={() => setAddingTaskToColumn(column._id)}
-                                        className="w-full py-2 flex items-center justify-center gap-1 text-gray-500 hover:text-gray-300 hover:bg-gray-800/50 rounded-lg transition-all text-sm dashed-border"
-                                    >
-                                        <span>+ Add Task</span>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </DragDropContext>
+      {/* Create Task Modal */}
+      {isCreateModalOpen && (
+        <CreateTaskModal
+          projectId={projectId}
+          initialStatus={createModalStatus}
+          onClose={() => setIsCreateModalOpen(false)}
+          onCreate={handleTaskCreated}
+        />
+      )}
     </div>
   );
 };

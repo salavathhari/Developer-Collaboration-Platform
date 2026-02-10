@@ -1,43 +1,27 @@
 import { useEffect, useState } from "react";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
-import { getPullRequestById, mergePullRequest, getComments, createComment } from "../services/prService";
-import type { Comment, PullRequest } from "../services/prService";
+import { getPullRequestById, mergePullRequest, approvePullRequest, rejectPullRequest, getComments, createComment, getPullRequestFile, getCommitHistory } from "../services/prService";
+import type { Comment, PullRequest, Commit } from "../services/prService";
 import type { Project } from "../types";
 import { useVideo } from "../context/VideoContext";
-
-// Mock diff for demonstration
-const MOCK_DIFF_OLD = `
-function add(a, b) {
-  return a + b;
-}
-
-function sub(a, b) {
-  return a - b;
-}
-`;
-
-const MOCK_DIFF_NEW = `
-function add(a, b) {
-  console.log('Adding', a, b);
-  return a + b;
-}
-
-// Subtraction feature removed as requested
-// function sub(a, b) {
-//   return a - b;
-// }
-
-function multiply(a, b) {
-  return a * b;
-}
-`;
+import { useAuth } from "../hooks/useAuth";
+import { useSocket } from "../hooks/useSocket";
 
 const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; onBack?: () => void }) => {
   const [pr, setPr] = useState<PullRequest | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commits, setCommits] = useState<Commit[]>([]);
   const [newComment, setNewComment] = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'files' | 'commits'>('files');
+  
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<{ oldCode: string, newCode: string }>({ oldCode: "", newCode: "" });
+  const [loadingFile, setLoadingFile] = useState(false);
+
   const { startCall } = useVideo();
+  const { user } = useAuth();
+  const socket = useSocket(localStorage.getItem("token"));
 
   useEffect(() => {
     const load = async () => {
@@ -48,6 +32,9 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
         ]);
         setPr(prData);
         setComments(commentsData);
+        if (prData.filesChanged?.length > 0) {
+            setActiveFile(prData.filesChanged[0].file);
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -57,14 +44,90 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
     if (prId) load();
   }, [prId]);
 
+  useEffect(() => {
+      if (activeTab === 'commits' && commits.length === 0 && prId) {
+          loadCommits();
+      }
+  }, [activeTab, prId]);
+
+  const loadCommits = async () => {
+      try {
+          const commitData = await getCommitHistory(prId);
+          setCommits(commitData);
+      } catch (err) {
+          console.error("Failed to load commits", err);
+      }
+  };
+
+  useEffect(() => {
+      if (!activeFile || !prId) return;
+      const fetchFile = async () => {
+          setLoadingFile(true);
+          try {
+              const { baseContent, headContent } = await getPullRequestFile(prId, activeFile);
+              setFileContent({ oldCode: baseContent, newCode: headContent });
+          } catch (e) {
+              console.error(e);
+              setFileContent({ oldCode: "", newCode: "Error loading content" });
+          } finally {
+              setLoadingFile(false);
+          }
+      };
+      fetchFile();
+  }, [activeFile, prId]);
+
+  useEffect(() => {
+      if(!socket || !prId) return;
+
+      const handleUpdate = (updatedPr: PullRequest) => {
+          if (updatedPr._id === prId) {
+              setPr(prev => prev ? { ...prev, ...updatedPr } : updatedPr);
+          }
+      };
+
+      const handleComment = (newComment: Comment) => {
+          if (newComment.pullRequestId === prId) {
+              setComments(prev => [...prev, newComment]);
+          }
+      };
+
+      socket.on("pr_updated", handleUpdate);
+      socket.on("pr_comment_added", handleComment);
+      socket.on("pr_merged", () => alert("PR Merged!"));
+      
+      return () => {
+          socket.off("pr_updated", handleUpdate);
+          socket.off("pr_comment_added", handleComment);
+          socket.off("pr_merged");
+      };
+  }, [socket, prId]);
+
   const handleMerge = async () => {
       if(!pr) return;
       if(!confirm("Merge this pull request?")) return;
       try {
-          const updated = await mergePullRequest(pr._id);
-          setPr(updated);
+          await mergePullRequest(pr._id);
       } catch(err) {
           alert("Merge failed");
+      }
+  };
+
+  const handleApprove = async () => {
+      if(!pr) return;
+      try {
+          await approvePullRequest(pr._id);
+      } catch(err) {
+          console.error(err);
+      }
+  };
+
+  const handleReject = async () => {
+      if(!pr) return;
+      if(!confirm("Reject this pull request?")) return;
+      try {
+          await rejectPullRequest(pr._id);
+      } catch(err) {
+          console.error(err);
       }
   };
 
@@ -85,8 +148,8 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
 
   return (
     <div className="flex flex-col h-full bg-[#050505] text-white overflow-hidden">
-        {/* Header */}
-        <div className="border-b border-gray-800 p-6 bg-[#0d1017]">
+        {/* Header - Sticky */}
+        <div className="sticky top-0 z-10 border-b border-gray-800 p-6 bg-[#0d1017]/95 backdrop-blur-sm">
             <div className="flex items-center gap-4 mb-4">
                 {onBack && (
                      <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-1 text-sm font-medium">
@@ -109,6 +172,31 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
                             <b>{pr.author?.name}</b> wants to merge into <code className="bg-gray-800 px-1 rounded">{pr.baseBranch}</code> from <code className="bg-gray-800 px-1 rounded">{pr.headBranch}</code>
                         </span>
                     </div>
+                    
+                    {/* Reviewer Badges */}
+                    {pr.reviewers && pr.reviewers.length > 0 && (
+                        <div className="flex items-center gap-2 mt-3">
+                            <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Reviewers:</span>
+                            <div className="flex items-center gap-2">
+                                {pr.reviewers.map(reviewer => {
+                                    const isApproved = pr.approvals?.includes(reviewer._id);
+                                    return (
+                                        <div key={reviewer._id} className="flex items-center gap-1 bg-gray-800 rounded-full pr-2 pl-1 py-1">
+                                            <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                                                {reviewer.name?.substring(0, 2).toUpperCase() || '?'}
+                                            </div>
+                                            <span className="text-xs text-gray-300">{reviewer.name}</span>
+                                            {isApproved && (
+                                                <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                </svg>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
                 
                 <div className="flex gap-2">
@@ -120,17 +208,68 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
                         Live Review
                      </button>
                     {pr.status === 'open' && (
-                        <button onClick={handleMerge} className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg shadow-purple-900/20">
-                            Merge Pull Request
-                        </button>
+                        <>
+                            <button onClick={handleApprove} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm">
+                                Approve
+                            </button>
+                            <button onClick={handleReject} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-sm">
+                                Reject
+                            </button>
+                             {(user?.id === project.owner._id || user?.id === project.owner.id || user?.id === pr.author._id) && (
+                                <button 
+                                    onClick={handleMerge} 
+                                    className="bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white px-6 py-2 rounded-lg font-bold shadow-lg shadow-purple-900/30 transition-all duration-300 hover:scale-105 hover:shadow-purple-900/50 animate-pulse"
+                                >
+                                    <span className="flex items-center gap-2">
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                                        </svg>
+                                        Merge
+                                    </span>
+                                </button>
+                            )}
+                        </>
                     )}
+                </div>
+            </div>
+            
+             {/* Metadata Bar */}
+            <div className="flex gap-6 text-sm text-gray-400 px-6 pb-4 bg-[#0d1017] border-b border-gray-800 -mt-2">
+                <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-300">{pr.reviewers?.length || 0}</span> Reviewers
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-300">{pr.approvals?.length || 0}</span> Approvals
+                </div>
+                 <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-300">{pr.filesChanged?.length || 0}</span> Files Changed
                 </div>
             </div>
         </div>
 
-        <div className="flex-1 overflow-auto flex">
+        <div className="flex flex-1 overflow-hidden">
+             {/* File List Sidebar */}
+             <div className="w-64 border-r border-gray-800 bg-[#0d1017] overflow-y-auto hidden md:block">
+                 <div className="p-4 font-bold text-xs uppercase text-gray-500 tracking-wider">Changed Files</div>
+                 <ul>
+                     {pr.filesChanged?.map(f => (
+                         <li 
+                            key={f.file} 
+                            onClick={() => setActiveFile(f.file)}
+                            className={`px-4 py-2 cursor-pointer text-sm truncate flex justify-between items-center ${activeFile === f.file ? 'bg-indigo-900/30 text-indigo-300 border-l-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+                         >
+                             <span className="truncate flex-1" title={f.file}>{f.file}</span>
+                             <span className="ml-2 text-[10px] flex gap-1">
+                                <span className="text-green-500">+{f.additions}</span>
+                                <span className="text-red-500">-{f.deletions}</span>
+                             </span>
+                         </li>
+                     ))}
+                 </ul>
+             </div>
+
             {/* Main Content: Diff */}
-            <div className="flex-1 p-6 overflow-y-auto">
+            <div className="flex-1 p-6 overflow-y-auto w-full">
                  <div className="mb-6">
                     <h3 className="font-bold text-gray-300 mb-2">Description</h3>
                     <div className="bg-[#0d1017] p-4 rounded border border-gray-800 text-gray-300 whitespace-pre-wrap">
@@ -138,40 +277,104 @@ const PRDetail = ({ project, prId, onBack }: { project: Project; prId: string; o
                     </div>
                  </div>
 
-                 <div className="mb-6">
-                     <h3 className="font-bold text-gray-300 mb-2">Files Changed (1)</h3>
-                     <div className="border border-gray-700 rounded-lg overflow-hidden bg-[#0d1117]">
-                         <div className="bg-[#161b22] px-4 py-2 border-b border-gray-700 text-sm font-mono text-gray-300">
-                             src/utils/math.js
-                         </div>
-                         <ReactDiffViewer 
-                            oldValue={MOCK_DIFF_OLD} 
-                            newValue={MOCK_DIFF_NEW} 
-                            splitView={true}
-                            useDarkTheme={true}
-                            styles={{
-                                variables: {
-                                    dark: {
-                                        diffViewerBackground: '#0d1117',
-                                        diffViewerColor: '#FFF',
-                                        addedBackground: '#2ea04326', // GitHub green
-                                        addedColor: 'white',
-                                        removedBackground: '#f8514926', // GitHub red
-                                        removedColor: 'white',
-                                        wordAddedBackground: '#2ea04366',
-                                        wordRemovedBackground: '#f8514966',
-                                        addedGutterBackground: '#2ea04326',
-                                        removedGutterBackground: '#f8514926',
-                                        gutterBackground: '#0d1117',
-                                        gutterColor: '#8b949e',
-                                        gutterBorder: '#30363d',
-                                        lineNumberColor: '#8b949e',
-                                    }
-                                }
-                            }}
-                         />
+                 {/* Tab Switcher */}
+                 <div className="mb-6 border-b border-gray-800">
+                     <div className="flex space-x-4">
+                         <button
+                             onClick={() => setActiveTab('files')}
+                             className={`px-4 py-2 font-medium transition-colors ${
+                                 activeTab === 'files'
+                                     ? 'text-blue-400 border-b-2 border-blue-400'
+                                     : 'text-gray-400 hover:text-gray-300'
+                             }`}
+                         >
+                             Files Changed ({pr.filesChanged?.length || 0})
+                         </button>
+                         <button
+                             onClick={() => setActiveTab('commits')}
+                             className={`px-4 py-2 font-medium transition-colors ${
+                                 activeTab === 'commits'
+                                     ? 'text-blue-400 border-b-2 border-blue-400'
+                                     : 'text-gray-400 hover:text-gray-300'
+                             }`}
+                         >
+                             Commits ({commits.length})
+                         </button>
                      </div>
                  </div>
+
+                 {activeTab === 'files' && (<div className="mb-6">
+                     <div className="flex items-center justify-between mb-2">
+                         <h3 className="font-bold text-gray-300">
+                             {activeFile ? `Diff: ${activeFile}` : 'Files Changed'}
+                         </h3>
+                     </div>
+                     <div className="border border-gray-700 rounded-lg overflow-hidden bg-[#0d1117]">
+                         <div className="bg-[#161b22] px-4 py-2 border-b border-gray-700 text-sm font-mono text-gray-300">
+                             {activeFile || 'Select a file'}
+                         </div>
+                         {loadingFile ? (
+                             <div className="p-10 text-center text-gray-500">Loading diff...</div>
+                         ) : (
+                            <ReactDiffViewer 
+                                oldValue={fileContent.oldCode} 
+                                newValue={fileContent.newCode} 
+                                splitView={true}
+                                useDarkTheme={true}
+                                styles={{
+                                    variables: {
+                                        dark: {
+                                            diffViewerBackground: '#0d1117',
+                                            diffViewerColor: '#FFF',
+                                            addedBackground: '#2ea04326', 
+                                            addedColor: 'white',
+                                            removedBackground: '#f8514926',
+                                            removedColor: 'white',
+                                            wordAddedBackground: '#2ea04366',
+                                            wordRemovedBackground: '#f8514966',
+                                            addedGutterBackground: '#2ea04326',
+                                            removedGutterBackground: '#f8514926',
+                                            gutterBackground: '#0d1117',
+                                            gutterColor: '#8b949e',
+                                        }
+                                    }
+                                }}
+                            />
+                         )}
+                     </div>
+                 </div>
+                 )}
+
+                 {activeTab === 'commits' && (
+                     <div className="space-y-4">
+                         {commits.length === 0 ? (
+                             <div className="text-center text-gray-500 py-8">No commits found.</div>
+                         ) : (
+                             commits.map((commit, idx) => (
+                                 <div key={idx} className="bg-[#161b22] border border-gray-700 rounded-lg p-4 hover:border-gray-600 transition-colors">
+                                     <div className="flex items-start space-x-3">
+                                         <div className="flex-shrink-0 w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 font-mono text-xs">
+                                             {commit.author?.substring(0, 2).toUpperCase() || 'UN'}
+                                         </div>
+                                         <div className="flex-1 min-w-0">
+                                             <div className="flex items-center space-x-2 mb-1">
+                                                 <span className="font-semibold text-gray-200">{commit.author || 'Unknown'}</span>
+                                                 <span className="text-gray-500 text-xs">committed on {new Date(commit.timestamp).toLocaleDateString()}</span>
+                                             </div>
+                                             <p className="text-gray-300 mb-2">{commit.message}</p>
+                                             <div className="flex items-center space-x-3">
+                                                 <code className="text-xs font-mono text-blue-400 bg-[#0d1117] px-2 py-1 rounded">
+                                                     {commit.hash?.substring(0, 7)}
+                                                 </code>
+                                                 <span className="text-xs text-gray-500">{commit.email}</span>
+                                             </div>
+                                         </div>
+                                     </div>
+                                 </div>
+                             ))
+                         )}
+                     </div>
+                 )}
             </div>
 
             {/* Sidebar: Reviews/Comments */}
