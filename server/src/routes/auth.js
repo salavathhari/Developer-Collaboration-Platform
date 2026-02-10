@@ -30,6 +30,7 @@ router.post("/login", authLimiter, login);
 router.post("/refresh", refreshAccessToken);
 router.post("/logout", logout);
 router.post("/request-password-reset", authLimiter, requestPasswordReset);
+router.post("/forgot-password", authLimiter, requestPasswordReset); // Alias for frontend consistency
 router.post("/reset-password", authLimiter, resetPassword);
 router.post("/resend-verification", authLimiter, resendVerification);
 

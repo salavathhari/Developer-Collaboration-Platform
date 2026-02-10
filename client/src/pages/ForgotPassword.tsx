@@ -24,7 +24,12 @@ const ForgotPassword: React.FC = () => {
         body: JSON.stringify({ email }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        throw new Error("Server returned invalid response");
+      }
 
       if (response.ok) {
         setSuccess(true);

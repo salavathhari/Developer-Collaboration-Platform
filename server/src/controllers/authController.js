@@ -4,7 +4,7 @@ const crypto = require("crypto");
 
 const User = require("../models/User");
 const AuthToken = require("../models/AuthToken");
-const { sendVerificationEmail, sendPasswordResetEmail } = require("../utils/emailService");
+const { sendVerificationEmail, sendPasswordResetEmail, sendLoginNotificationEmail } = require("../utils/emailService");
 
 // Token expiry constants
 const ACCESS_TOKEN_EXPIRES = process.env.ACCESS_TOKEN_EXPIRES || "15m";
@@ -266,6 +266,26 @@ const login = async (req, res) => {
     // Set refresh token cookie
     setRefreshTokenCookie(res, refreshToken, rememberMe);
 
+    // Send login notification email (async, non-blocking)
+    // Capture login details for security notification
+    const loginDetails = {
+      timestamp: new Date().toLocaleString('en-US', { 
+        timeZone: 'UTC',
+        dateStyle: 'full',
+        timeStyle: 'long'
+      }),
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'Unknown',
+      userAgent: req.headers['user-agent'] || 'Unknown Browser',
+    };
+
+    console.log(`\x1b[36m[Auth] Login successful for: ${user.email}\x1b[0m`);
+    console.log(`   IP: ${loginDetails.ipAddress}`);
+    console.log(`   Device: ${loginDetails.userAgent.substring(0, 50)}...`);
+
+    // Send email asynchronously - don't await or block the response
+    sendLoginNotificationEmail(user.email, user.name, loginDetails)
+      .catch(err => console.error('\x1b[31m[Auth] Login notification email failed:\x1b[0m', err.message));
+
     res.status(200).json({
       success: true,
       accessToken,
@@ -373,6 +393,8 @@ const requestPasswordReset = async (req, res) => {
   try {
     const { email } = req.body;
 
+    console.log(`\x1b[36m[Auth] Password reset requested for: ${email}\x1b[0m`);
+
     if (!email) {
       return res.status(400).json({ error: "Email is required" });
     }
@@ -387,8 +409,11 @@ const requestPasswordReset = async (req, res) => {
     };
 
     if (!user) {
+      console.log(`\x1b[33m[Auth] Password reset - User not found: ${email}\x1b[0m`);
       return res.status(200).json(successResponse);
     }
+
+    console.log(`\x1b[32m[Auth] User found: ${user.name} (${user._id})\x1b[0m`);
 
     // Generate reset token
     const resetToken = createSecureToken();
@@ -408,16 +433,20 @@ const requestPasswordReset = async (req, res) => {
       expiresAt: new Date(Date.now() + RESET_TOKEN_EXPIRES),
     });
 
+    console.log(`\x1b[32m[Auth] Reset token created, expires in 1 hour\x1b[0m`);
+
     // Send reset email
     try {
       await sendPasswordResetEmail(user.email, user.name, resetToken);
+      console.log(`\x1b[32m[Auth] Password reset email sent successfully\x1b[0m`);
     } catch (emailError) {
-      console.error("Failed to send password reset email:", emailError);
+      console.error(`\x1b[31m[Auth] Failed to send password reset email:\x1b[0m`, emailError.message);
+      // Continue anyway - we don't want to reveal email sending failure
     }
 
     res.status(200).json(successResponse);
   } catch (error) {
-    console.error("Request password reset error:", error);
+    console.error("\x1b[31m[Auth] Request password reset error:\x1b[0m", error);
     res.status(500).json({ error: "Password reset request failed" });
   }
 };
@@ -430,6 +459,8 @@ const resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
+    console.log(`\x1b[36m[Auth] Password reset attempt with token\x1b[0m`);
+
     if (!token || !newPassword) {
       return res.status(400).json({ error: "Token and new password are required" });
     }
@@ -437,6 +468,7 @@ const resetPassword = async (req, res) => {
     // Validate new password
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.valid) {
+      console.log(`\x1b[33m[Auth] Password validation failed: ${passwordValidation.message}\x1b[0m`);
       return res.status(400).json({ error: passwordValidation.message });
     }
 
@@ -450,24 +482,31 @@ const resetPassword = async (req, res) => {
     });
 
     if (!authToken) {
+      console.log(`\x1b[33m[Auth] Invalid or revoked reset token\x1b[0m`);
       return res.status(400).json({ error: "Invalid or expired reset token" });
     }
 
     // Check expiry
     if (authToken.expiresAt < new Date()) {
+      console.log(`\x1b[33m[Auth] Reset token expired\x1b[0m`);
       return res.status(400).json({ error: "Reset token has expired" });
     }
 
     // Find user
     const user = await User.findById(authToken.userId);
     if (!user) {
+      console.log(`\x1b[31m[Auth] User not found for token\x1b[0m`);
       return res.status(404).json({ error: "User not found" });
     }
+
+    console.log(`\x1b[32m[Auth] Valid token found for user: ${user.name} (${user.email})\x1b[0m`);
 
     // Hash new password
     const passwordHash = await bcrypt.hash(newPassword, 12);
     user.password = passwordHash;
     await user.save();
+
+    console.log(`\x1b[32m[Auth] Password updated successfully\x1b[0m`);
 
     // Revoke reset token
     authToken.revokedAt = new Date();
@@ -479,12 +518,14 @@ const resetPassword = async (req, res) => {
       { revokedAt: new Date() }
     );
 
+    console.log(`\x1b[32m[Auth] All refresh tokens revoked for user security\x1b[0m`);
+
     res.status(200).json({
       success: true,
       message: "Password has been reset successfully. Please log in with your new password.",
     });
   } catch (error) {
-    console.error("Reset password error:", error);
+    console.error("\x1b[31m[Auth] Reset password error:\x1b[0m", error);
     res.status(500).json({ error: "Password reset failed" });
   }
 };
