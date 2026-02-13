@@ -4,6 +4,13 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
+const logger = require("./utils/logger");
+const { 
+  initSentry, 
+  sentryRequestHandler, 
+  sentryTracingHandler, 
+  sentryErrorHandler 
+} = require("./utils/sentry");
 
 const healthRoutes = require("./routes/health");
 const authRoutes = require("./routes/auth");
@@ -32,6 +39,14 @@ const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
+// Initialize Sentry (must be first)
+initSentry(app);
+
+// Sentry request handler (must be first middleware)
+app.use(sentryRequestHandler());
+app.use(sentryTracingHandler());
+
+// Security middleware
 app.use(helmet());
 app.use(
 	rateLimit({
@@ -76,6 +91,10 @@ app.use("/api/columns", columnRoutes);
 app.use("/api/pull-requests", prRoutes);
 app.use("/api/meetings", meetingRoutes);
 app.use("/api/notifications", notificationRoutes);
+// Sentry error handler (must be before other error handlers)
+app.use(sentryErrorHandler());
+
+// Application error handlers
 app.use("/api/repos", repoRoutes);
 app.use("/api/code", codeRoutes);
 app.use("/api/ai", aiRoutes);

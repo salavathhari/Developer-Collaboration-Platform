@@ -1,0 +1,313 @@
+config:
+  target: "http://localhost:5000"
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up"
+    
+    # Ramp-up phase
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 25
+      name: "Ramp-up"
+    
+    # Sustained load phase
+    - duration: 120
+      arrivalRate: 25
+      name: "Sustained Load"
+    
+    # Spike test
+    - duration: 30
+      arrivalRate: 50
+      name: "Spike"
+    
+    # Cool-down
+    - duration: 30
+      arrivalRate: 10
+      name: "Cool-down"
+  
+  # Performance thresholds
+  ensure:
+    maxErrorRate: 1           # Max 1% error rate
+    p95: 1000                 # 95th percentile < 1000ms
+    p99: 2000                 # 99th percentile < 2000ms
+  
+  # Plugins for metrics
+  plugins:
+    expect: {}
+    metrics-by-endpoint: {}
+
+  # Processor for custom logic
+  processor: "./load-testing/processor.js"
+
+# Test scenarios with realistic distribution
+scenarios:
+  # 30% - Authentication flows
+  - name: "Authentication Flow"
+    weight: 30
+    flow:
+      - post:
+          url: "/api/auth/register"
+          json:
+            name: "Load Test User {{ $randomString() }}"
+            email: "loadtest{{ $randomNumber(1000, 9999) }}@example.com"
+            password: "LoadTest@123"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.data.user._id"
+              as: "userId"
+          expect:
+            - statusCode: 200
+            - hasProperty: "token"
+      
+      - think: 2
+      
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "loadtest{{ $randomNumber(1000, 9999) }}@example.com"
+            password: "LoadTest@123"
+          capture:
+            - json: "$.token"
+              as: "loginToken"
+          expect:
+            - statusCode: [200, 404]  # 404 is OK if user doesn't exist
+      
+      - think: 1
+      
+      - get:
+          url: "/api/auth/me"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
+
+  # 40% - Task Management
+  - name: "Task Operations"
+    weight: 40
+    flow:
+      # Login first
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ $processEnvironment.TEST_USER_EMAIL || 'test@example.com' }}"
+            password: "{{ $processEnvironment.TEST_USER_PASSWORD || 'Test@123' }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+            - json: "$.data.user._id"
+              as: "userId"
+      
+      - think: 1
+      
+      # Get projects
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          capture:
+            - json: "$[0]._id"
+              as: "projectId"
+          expect:
+            - statusCode: 200
+      
+      - think: 2
+      
+      # Create task
+      - post:
+          url: "/api/projects/{{ projectId }}/tasks"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            title: "Load Test Task {{ $randomString() }}"
+            description: "Created during load testing"
+            status: "to_do"
+            priority: "medium"
+          capture:
+            - json: "$.data.task._id"
+              as: "taskId"
+          expect:
+            - statusCode: [200, 201]
+      
+      - think: 3
+      
+      # Get tasks
+      - get:
+          url: "/api/tasks?projectId={{ projectId }}"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+      
+      - think: 2
+      
+      # Update task
+      - put:
+          url: "/api/projects/{{ projectId }}/tasks/{{ taskId }}"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            status: "in_progress"
+          expect:
+            - statusCode: [200, 404]  # 404 OK if task doesn't exist
+  
+  # 20% - Pull Request Workflow
+  - name: "Pull Request Operations"
+    weight: 20
+    flow:
+      # Login
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ $processEnvironment.TEST_USER_EMAIL || 'test@example.com' }}"
+            password: "{{ $processEnvironment.TEST_USER_PASSWORD || 'Test@123' }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+      
+      - think: 1
+      
+      # Get projects
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          capture:
+            - json: "$[0]._id"
+              as: "projectId"
+      
+      - think: 2
+      
+      # Create PR
+      - post:
+          url: "/api/pull-requests"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            title: "Load Test PR {{ $randomString() }}"
+            description: "Created during load testing"
+            projectId: "{{ projectId }}"
+            sourceBranch: "feature/load-test-{{ $randomNumber(1, 1000) }}"
+            targetBranch: "main"
+          capture:
+            - json: "$.data.pullRequest._id"
+              as: "prId"
+          expect:
+            - statusCode: [200, 201]
+      
+      - think: 3
+      
+      # Get PRs
+      - get:
+          url: "/api/pull-requests?projectId={{ projectId }}"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+      
+      - think: 2
+      
+      # Add review
+      - post:
+          url: "/api/pull-requests/{{ prId }}/review"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            status: "approved"
+            comment: "LGTM - Load test review"
+          expect:
+            - statusCode: [200, 404]
+  
+  # 10% - Chat & Notifications
+  - name: "Chat and Notifications"
+    weight: 10
+    flow:
+      # Login
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ $processEnvironment.TEST_USER_EMAIL || 'test@example.com' }}"
+            password: "{{ $processEnvironment.TEST_USER_PASSWORD || 'Test@123' }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+      
+      - think: 1
+      
+      # Get projects
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          capture:
+            - json: "$[0]._id"
+              as: "projectId"
+      
+      - think: 1
+      
+      # Send message
+      - post:
+          url: "/api/projects/{{ projectId }}/messages"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            content: "Load test message {{ $randomString() }}"
+          expect:
+            - statusCode: [200, 201]
+      
+      - think: 2
+      
+      # Get notifications
+      - get:
+          url: "/api/notifications"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+      
+      - think: 1
+      
+      # Mark notification as read
+      - put:
+          url: "/api/notifications/mark-read"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: [200, 404]
+
+# Additional scenarios for stress testing specific endpoints
+  - name: "Health Check Monitoring"
+    weight: 5
+    flow:
+      - get:
+          url: "/api/health"
+          expect:
+            - statusCode: 200
+            - hasProperty: "status"
+      
+      - think: 5
+      
+      - get:
+          url: "/api/health/detailed"
+          expect:
+            - statusCode: 200
+
+# WebSocket connection test (if socket.io-artillery is installed)
+  - name: "WebSocket Connection"
+    weight: 5
+    engine: socketio
+    flow:
+      - emit:
+          channel: "join-room"
+          data:
+            projectId: "{{ $processEnvironment.TEST_PROJECT_ID }}"
+      
+      - think: 5
+      
+      - emit:
+          channel: "send-message"
+          data:
+            content: "WebSocket load test message"
+            projectId: "{{ $processEnvironment.TEST_PROJECT_ID }}"

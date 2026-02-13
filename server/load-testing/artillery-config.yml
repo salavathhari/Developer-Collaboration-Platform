@@ -1,0 +1,234 @@
+config:
+  target: "http://localhost:5000"
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm up"
+    
+    # Ramp up phase
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 50
+      name: "Ramp up load"
+    
+    # Sustained load
+    - duration: 120
+      arrivalRate: 50
+      name: "Sustained load"
+    
+    # Spike test
+    - duration: 30
+      arrivalRate: 100
+      name: "Spike test"
+  
+  # Performance thresholds
+  ensure:
+    maxErrorRate: 1  # Max 1% error rate
+    p95: 1000  # 95th percentile response time < 1000ms
+    p99: 2000  # 99th percentile response time < 2000ms
+  
+  # HTTP settings
+  http:
+    timeout: 10
+    pool: 50  # Connection pool size
+
+  # Test data
+  payload:
+    path: "./test-data.csv"
+    fields:
+      - email
+      - password
+      - projectName
+      - taskTitle
+
+  # Plugins for custom metrics
+  plugins:
+    expect: {}
+    metrics-by-endpoint:
+      stripQueryString: true
+
+scenarios:
+  # 1. Authentication Flow Test
+  - name: "Authentication flow"
+    weight: 30
+    flow:
+      - post:
+          url: "/api/auth/register"
+          json:
+            name: "Load Test User {{ $randomString() }}"
+            email: "loadtest-{{ $randomString() }}@test.com"
+            password: "TestPassword123!"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.user._id"
+              as: "userId"
+          expect:
+            - statusCode: 201
+            - contentType: json
+            - hasProperty: token
+      
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "loginToken"
+          expect:
+            - statusCode: 200
+            - hasProperty: token
+      
+      - get:
+          url: "/api/auth/me"
+          headers:
+            Authorization: "Bearer {{ loginToken }}"
+          expect:
+            - statusCode: 200
+
+  # 2. Task Management Flow
+  - name: "Task management"
+    weight: 40
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.user._id"
+              as: "userId"
+      
+      - post:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            name: "Load Test Project {{ $randomString() }}"
+            description: "Performance testing project"
+          capture:
+            - json: "$.project._id"
+              as: "projectId"
+          expect:
+            - statusCode: 201
+      
+      - post:
+          url: "/api/tasks"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            title: "Task {{ $randomString() }}"
+            description: "Load test task"
+            projectId: "{{ projectId }}"
+            priority: "medium"
+            status: "to_do"
+          capture:
+            - json: "$.task._id"
+              as: "taskId"
+          expect:
+            - statusCode: 201
+      
+      - get:
+          url: "/api/tasks?projectId={{ projectId }}"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
+      
+      - put:
+          url: "/api/tasks/{{ taskId }}"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            status: "in_progress"
+          expect:
+            - statusCode: 200
+      
+      - delete:
+          url: "/api/tasks/{{ taskId }}"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
+
+  # 3. Pull Request Flow
+  - name: "Pull request workflow"
+    weight: 20
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.user._id"
+              as: "userId"
+      
+      - post:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            name: "PR Test Project {{ $randomString() }}"
+            description: "PR testing"
+          capture:
+            - json: "$.project._id"
+              as: "projectId"
+      
+      - post:
+          url: "/api/pull-requests"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            title: "PR {{ $randomString() }}"
+            description: "Load test PR"
+            sourceBranch: "feature-{{ $randomString() }}"
+            targetBranch: "main"
+            projectId: "{{ projectId }}"
+          capture:
+            - json: "$.pullRequest._id"
+              as: "prId"
+          expect:
+            - statusCode: 201
+      
+      - get:
+          url: "/api/pull-requests?projectId={{ projectId }}"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
+
+  # 4. Analytics & Dashboard
+  - name: "Analytics endpoints"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.user._id"
+              as: "userId"
+      
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
+      
+      - get:
+          url: "/api/notifications"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
