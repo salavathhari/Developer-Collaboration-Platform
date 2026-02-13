@@ -10,32 +10,27 @@ const { logActivity } = require("../utils/activity");
 const setupCollaborationHandlers = require("./collaborationHandlers");
 const setupWorkflowHandlers = require("./workflowHandlers");
 const setupTaskHandlers = require("./taskSocket");
+const {
+  wrapSocketHandler,
+  SocketRateLimiter,
+  handleDisconnection,
+  ConnectionMonitor,
+} = require("../utils/socketHelpers");
 
 // projectId -> Set(userId)
 const presenceMap = new Map();
-// userId -> { count, resetAt }
-const rateLimitMap = new Map();
+
+// Initialize rate limiter
+const messageLimiter = new SocketRateLimiter(
+  Number(process.env.SOCKET_RATE_LIMIT || 30),
+  Number(process.env.SOCKET_RATE_WINDOW_MS || 60000)
+);
 
 const getPresenceSet = (projectId) => {
   if (!presenceMap.has(projectId)) {
     presenceMap.set(projectId, new Set());
   }
   return presenceMap.get(projectId);
-};
-
-const canSend = (userId, limit, windowMs) => {
-  const now = Date.now();
-  const entry = rateLimitMap.get(userId) || { count: 0, resetAt: now + windowMs };
-
-  if (now > entry.resetAt) {
-    entry.count = 0;
-    entry.resetAt = now + windowMs;
-  }
-
-  entry.count += 1;
-  rateLimitMap.set(userId, entry);
-
-  return entry.count <= limit;
 };
 
 const setupRedisAdapter = async (io) => {
@@ -91,9 +86,12 @@ const initSocketServer = async (httpServer) => {
   });
 
   io.on("connection", (socket) => {
-    console.log(`Socket connected: ${socket.id} (User: ${socket.userId})`);
+    console.log(`✅ Socket connected: ${socket.id} (User: ${socket.userId})`);
     const userId = socket.userId;
     socket.join(`user:${userId}`);
+
+    // Setup enhanced disconnection handling
+    handleDisconnection(socket, userId, presenceMap, io);
 
     // Setup collaboration handlers (chat, PR comments, live review)
     setupCollaborationHandlers(io, socket, userId);
@@ -104,13 +102,16 @@ const initSocketServer = async (httpServer) => {
     // Setup task handlers (real-time task updates, drag & drop)
     setupTaskHandlers(io, socket, userId);
 
-    socket.on("join_room", async ({ projectId }) => {
+    // Enhanced join room with validation
+    socket.on("join_room", wrapSocketHandler(async ({ projectId }) => {
       if (!projectId) {
+        socket.emit("error", { message: "Project ID required", code: "INVALID_PROJECT_ID" });
         return;
       }
 
       const project = await Project.findById(projectId);
       if (!project) {
+        socket.emit("error", { message: "Project not found", code: "PROJECT_NOT_FOUND" });
         return;
       }
 
@@ -119,19 +120,23 @@ const initSocketServer = async (httpServer) => {
         project.members.some((member) => member.user.toString() === userId);
 
       if (!isMember) {
+        socket.emit("error", { message: "Access denied", code: "NOT_PROJECT_MEMBER" });
         return;
       }
 
       socket.join(projectId);
       const presenceSet = getPresenceSet(projectId);
       presenceSet.add(userId);
+      
       io.to(projectId).emit("presence_update", {
         projectId,
         onlineUserIds: Array.from(presenceSet),
       });
-    });
 
-    socket.on("leave_room", ({ projectId }) => {
+      socket.emit("room_joined", { projectId, success: true });
+    }));
+
+    socket.on("leave_room", wrapSocketHandler(({ projectId }) => {
       if (!projectId) {
         return;
       }
@@ -139,11 +144,12 @@ const initSocketServer = async (httpServer) => {
       socket.leave(projectId);
       const presenceSet = getPresenceSet(projectId);
       presenceSet.delete(userId);
+      
       io.to(projectId).emit("presence_update", {
         projectId,
         onlineUserIds: Array.from(presenceSet),
       });
-    });
+    }));
 
     const emitTyping = (projectId) => {
       if (projectId) {
@@ -164,15 +170,19 @@ const initSocketServer = async (httpServer) => {
     socket.on("stop_typing", ({ projectId }) => emitStopTyping(projectId));
     socket.on("typing_stop", ({ projectId }) => emitStopTyping(projectId));
 
-    socket.on("send_message", async ({ projectId, content, attachments }) => {
+    socket.on("send_message", wrapSocketHandler(async ({ projectId, content, attachments }) => {
       if (!projectId) {
+        socket.emit("error", { message: "Project ID required", code: "INVALID_PROJECT_ID" });
         return;
       }
 
-      const rateLimit = Number(process.env.SOCKET_RATE_LIMIT || 30);
-      const windowMs = Number(process.env.SOCKET_RATE_WINDOW_MS || 60000);
-      if (!canSend(userId, rateLimit, windowMs)) {
-        socket.emit("rate_limited", { message: "Too many messages" });
+      // Rate limiting with enhanced feedback
+      const rateCheck = messageLimiter.checkLimit(userId);
+      if (!rateCheck.allowed) {
+        socket.emit("rate_limited", {
+          message: "Too many messages. Please slow down.",
+          retryAfter: rateCheck.retryAfter,
+        });
         return;
       }
 
@@ -183,6 +193,7 @@ const initSocketServer = async (httpServer) => {
       const safeAttachments = Array.isArray(attachments) ? attachments : [];
 
       if (!cleanContent && safeAttachments.length === 0) {
+        socket.emit("error", { message: "Message cannot be empty", code: "EMPTY_MESSAGE" });
         return;
       }
 
@@ -213,7 +224,9 @@ const initSocketServer = async (httpServer) => {
           const notification = await createNotification({
             userId: targetId,
             type: "message",
+            message: "New message in project",
             projectId,
+            referenceId: message._id,
             payload: { messageId: message.id },
           });
           emitNotification(io, notification);
@@ -233,14 +246,18 @@ const initSocketServer = async (httpServer) => {
             const notification = await createNotification({
               userId: mentionedId,
               type: "mention",
+              message: "You were mentioned in a message",
               projectId,
+              referenceId: message._id,
               payload: { messageId: message.id },
             });
             emitNotification(io, notification);
           }
         }
       }
-    });
+
+      socket.emit("message_sent", { success: true, messageId: message._id });
+    }));
 
     socket.on("message_reaction", async ({ messageId, emoji }) => {
       if (!messageId || !emoji) {

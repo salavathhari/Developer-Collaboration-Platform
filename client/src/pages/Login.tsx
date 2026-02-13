@@ -3,7 +3,6 @@ import type { ChangeEvent, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { acceptInvite } from "../services/projectService";
-import logo from "../assets/devcollablogo-removebg-preview.png";
 
 const isValidEmail = (email: string) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -17,6 +16,8 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showResendVerification, setShowResendVerification] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
@@ -42,7 +43,7 @@ const Login = () => {
 
     try {
       setLoading(true);
-      await login(form);
+      await login(form.email, form.password);
 
       const pendingInvite = localStorage.getItem("pendingInviteToken");
       if (pendingInvite) {
@@ -57,14 +58,45 @@ const Login = () => {
       setSuccess("Signed in. Redirecting...");
       setTimeout(() => navigate("/dashboard"), 600);
     } catch (err: any) {
-      if (err?.response?.status === 401) {
-        setError("Invalid email or password.");
-      } else {
-        const message = err?.response?.data?.message || "Login failed.";
-        setError(message);
+      const message = err?.response?.data?.error || err?.response?.data?.message || "Login failed. Please try again.";
+      setError(message);
+      
+      // Show resend verification button if email not verified
+      if (err?.response?.status === 403 || message.includes("verify")) {
+        setShowResendVerification(true);
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!form.email) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    try {
+      setResending(true);
+      setError(null);
+      const response = await fetch("http://localhost:5000/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess("Verification email sent! Check your inbox (and spam folder).");
+        setShowResendVerification(false);
+      } else {
+        setError(data.error || "Failed to resend verification email");
+      }
+    } catch (err) {
+      setError("Failed to resend verification email. Please try again.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -72,14 +104,7 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-6 cursor-pointer" onClick={() => navigate("/")}>
-            <img
-              src={logo}
-              alt="DevCollab logo"
-              className="h-12 w-12"
-            />
-            <span className="text-xl font-bold text-white">DevCollab</span>
-          </div>
+          <img alt="DevCollab" className="h-12 mx-auto mb-8" src="/logo.png" />
           <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
           <p className="text-gray-400">Sign in to your account</p>
         </div>
@@ -88,6 +113,16 @@ const Login = () => {
            {error && (
             <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm">
               {error}
+              {showResendVerification && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resending}
+                  className="mt-2 text-indigo-400 hover:text-indigo-300 underline text-sm font-medium disabled:opacity-50"
+                >
+                  {resending ? "Sending..." : "Resend verification email"}
+                </button>
+              )}
             </div>
           )}
           {success && (

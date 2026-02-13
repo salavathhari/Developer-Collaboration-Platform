@@ -1,12 +1,14 @@
 const Project = require("../models/Project");
 const User = require("../models/User");
 const Invite = require("../models/Invite");
+const Column = require("../models/Column");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
 const { createInviteToken, hashToken } = require("../utils/token");
 const { createNotification, emitNotification } = require("../utils/notify");
 const { logActivity } = require("../utils/activity");
 const { sendEmail } = require("../utils/email");
+const notificationService = require("../services/notificationService");
 
 const inviteTtlMs = Number(process.env.INVITE_TOKEN_TTL_MS || 1000 * 60 * 60 * 24 * 7);
 
@@ -20,12 +22,33 @@ const createProject = asyncHandler(async (req, res) => {
     members: [{ user: req.user.id, role: "owner" }],
   });
 
+  // Create default Kanban columns
+  const defaultColumns = [
+    { name: "To Do", order: 0 },
+    { name: "In Progress", order: 1 },
+    { name: "Review", order: 2 },
+    { name: "Done", order: 3 },
+  ];
+
+  await Promise.all(
+    defaultColumns.map((col) =>
+      Column.create({
+        name: col.name,
+        projectId: project.id,
+        order: col.order,
+      })
+    )
+  );
+
   await logActivity({
     projectId: project.id,
     actorId: req.user.id,
     type: "projectCreated",
     payload: { projectId: project.id },
   });
+
+  console.log(`✅ Project created: ${project.name} by ${req.user.name}`);
+  console.log(`✅ Default Kanban columns initialized`);
 
   return res.status(201).json({ project });
 });
@@ -215,6 +238,7 @@ const acceptInvite = asyncHandler(async (req, res) => {
     payload: { userId: req.user.id },
   });
 
+  // Notify inviter
   const io = req.app.get("io");
   const notification = await createNotification({
     userId: invite.inviterId,
@@ -225,6 +249,17 @@ const acceptInvite = asyncHandler(async (req, res) => {
     payload: { projectId: project.id, userId: req.user.id },
   });
   emitNotification(io, notification);
+
+  // Notify all project members about new member
+  const memberIds = project.members.map((m) => m.user.toString()).filter((id) => id !== req.user.id);
+  if (memberIds.length > 0) {
+    await notificationService.notifyMemberJoined({
+      projectId: project.id,
+      projectName: project.name,
+      newMemberId: req.user.id,
+      members: memberIds,
+    });
+  }
 
   return res.status(200).json({ project });
 });

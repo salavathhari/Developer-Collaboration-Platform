@@ -56,6 +56,7 @@ Server (see `server/.env.example`):
 - `S3_BUCKET`, `S3_REGION`, `AWS_S3_KEY`, `AWS_S3_SECRET` (optional)
 - `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_LOCAL_URL`
 - `EMAIL_SMTP_HOST`, `EMAIL_SMTP_USER`, `EMAIL_SMTP_PASS` (optional)
+- `CLAMAV_ENABLED`, `CLAMAV_REQUIRED`, `CLAMAV_COMMAND`, `CLAMAV_TIMEOUT_MS`, `CLAMAV_ARGS` (optional)
 
 Client (see `client/.env.example`):
 - `VITE_API_URL`

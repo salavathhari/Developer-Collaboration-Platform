@@ -6,6 +6,7 @@ const Attachment = require("../models/Attachment");
 const MergeRequestAudit = require("../models/MergeRequestAudit");
 const Notification = require("../models/Notification");
 const gitService = require("../services/gitService");
+const notificationService = require("../services/notificationService");
 const { createNotification, emitNotification } = require("../utils/notify");
 
 const ensureProjectMember = async (projectId, userId) => {
@@ -222,25 +223,16 @@ exports.createPullRequest = async (req, res) => {
     io.to(projectId.toString()).emit("pr_created", pr);
     io.to(projectId.toString()).emit("pr:created", pr);
 
-    // Notify reviewers
+    // Notify reviewers using notification service
     if (reviewers && reviewers.length > 0) {
-        const notifications = reviewers.map(reviewerId => ({
-          userId: reviewerId,
-          type: "pr_review_requested",
-          message: `You have been assigned to review PR #${number}: ${title}`,
-          referenceId: pr._id,
-          projectId,
-          payload: { prNumber: number, prTitle: title, author: req.user.name }
-        }));
-        await Notification.insertMany(notifications);
-
-        for (const reviewerId of reviewers) {
-             const notif = await Notification.findOne({ 
-               userId: reviewerId, 
-               referenceId: pr._id 
-             }).sort({ createdAt: -1 });
-             if (notif) emitNotification(io, notif);
-        }
+      await notificationService.notifyPRCreated({
+        prId: pr._id,
+        prNumber: number,
+        prTitle: title,
+        authorId: userId,
+        projectId,
+        reviewers,
+      });
     }
     
     res.status(201).json({ success: true, pr });
@@ -364,23 +356,21 @@ exports.mergePullRequest = async (req, res) => {
         io.to(pr.projectId._id.toString()).emit("pr_merged", { prId: pr._id });
         io.to(pr.projectId._id.toString()).emit("pr:merged", { prId: pr._id });
 
-        // Notify participants
-        const notificationRecipients = [
+        // Notify participants using notification service
+        const watchers = [
           pr.author.toString(),
           ...pr.reviewers.map(r => r.toString())
-        ].filter(id => id !== userId);
+        ];
 
-        if (notificationRecipients.length > 0) {
-          const notifications = notificationRecipients.map(recipientId => ({
-            userId: recipientId,
-            type: "pr_merged",
-            message: `PR #${pr.number}: ${pr.title} has been merged by ${req.user.name}`,
-            referenceId: pr._id,
-            projectId: pr.projectId._id,
-            payload: { prNumber: pr.number, mergedBy: req.user.name }
-          }));
-          await Notification.insertMany(notifications);
-        }
+        await notificationService.notifyPRMerged({
+          prId: pr._id,
+          prNumber: pr.number,
+          prTitle: pr.title,
+          mergerId: userId,
+          authorId: pr.author._id || pr.author,
+          projectId: pr.projectId._id,
+          watchers,
+        });
 
         res.json({ 
           success: true, 
@@ -451,14 +441,14 @@ exports.approvePullRequest = async (req, res) => {
         io.to(pr.projectId._id.toString()).emit("pr_approved", { prId: pr._id, approverId: userId });
         io.to(pr.projectId._id.toString()).emit("pr:approved", { prId: pr._id, approverId: userId });
 
-        // Notify PR author
-        await Notification.create({
-          userId: pr.author._id,
-          type: "pr_approved",
-          message: `${req.user.name} approved your PR #${pr.number}: ${pr.title}`,
-          referenceId: pr._id,
+        // Notify PR author using notification service
+        await notificationService.notifyPRApproved({
+          prId: pr._id,
+          prNumber: pr.number,
+          prTitle: pr.title,
+          approverId: userId,
+          authorId: pr.author._id,
           projectId: pr.projectId._id,
-          payload: { prNumber: pr.number, approver: req.user.name }
         });
 
         res.json({ success: true, pr, message: "PR approved successfully" });

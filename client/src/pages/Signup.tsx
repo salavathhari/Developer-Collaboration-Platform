@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import logo from "../assets/devcollablogo-removebg-preview.png";
 
 const isValidEmail = (email: string) => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -65,14 +64,7 @@ const Signup = () => {
     <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-6 cursor-pointer" onClick={() => navigate("/")}>
-            <img
-              src={logo}
-              alt="DevCollab logo"
-              className="h-12 w-12"
-            />
-            <span className="text-xl font-bold text-white">DevCollab</span>
-          </div>
+          <img alt="DevCollab" className="h-12 mx-auto mb-8" src="/logo.png" />
           <h1 className="text-3xl font-bold text-white mb-2">Get Started</h1>
           <p className="text-gray-400">Create your account</p>
         </div>

@@ -1,6 +1,13 @@
 const multer = require("multer");
 const path = require("path");
 const crypto = require("crypto");
+const os = require("os");
+const fs = require("fs/promises");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const logger = require("../utils/logger");
+
+const execFileAsync = promisify(execFile);
 
 // Configuration
 const FILE_MAX_BYTES = parseInt(process.env.FILE_MAX_BYTES) || 10 * 1024 * 1024; // 10MB default
@@ -59,6 +66,15 @@ const BLOCKED_EXTENSIONS = [
   ".deb",
   ".rpm",
 ];
+
+// Antivirus scanning configuration (ClamAV CLI)
+const CLAMAV_ENABLED = process.env.CLAMAV_ENABLED === "true";
+const CLAMAV_REQUIRED = process.env.CLAMAV_REQUIRED === "true";
+const CLAMAV_COMMAND = process.env.CLAMAV_COMMAND || "clamdscan";
+const CLAMAV_TIMEOUT_MS = parseInt(process.env.CLAMAV_TIMEOUT_MS, 10) || 15000;
+const CLAMAV_ARGS = process.env.CLAMAV_ARGS
+  ? process.env.CLAMAV_ARGS.split(",").map((arg) => arg.trim()).filter(Boolean)
+  : [];
 
 /**
  * Sanitize filename
@@ -124,32 +140,58 @@ const validateFile = (file) => {
  * In production, integrate with ClamAV or similar service
  */
 const scanForVirus = async (buffer) => {
-  // TODO: Implement actual virus scanning
-  // Example: Use node-clamav or external API
-  // const clamav = require('clamav.js');
-  // const result = await clamav.scanBuffer(buffer);
-  // if (result.isInfected) {
-  //   throw new Error('Virus detected in uploaded file');
-  // }
-  
-  // For now, just a placeholder check for obviously malicious patterns
-  const stringContent = buffer.toString("utf-8", 0, Math.min(buffer.length, 1024));
-  const suspiciousPatterns = [
-    /eval\(/gi,
-    /exec\(/gi,
-    /<script>/gi,
-    /cmd\.exe/gi,
-  ];
-  
-  for (const pattern of suspiciousPatterns) {
-    if (pattern.test(stringContent)) {
-      console.warn("Suspicious content detected in file");
-      // In production, might want to reject the file
-      // throw new Error('Suspicious content detected');
-    }
+  if (!CLAMAV_ENABLED) {
+    return true;
   }
-  
-  return true;
+
+  const tempName = `upload_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+  const tempPath = path.join(os.tmpdir(), tempName);
+
+  try {
+    await fs.writeFile(tempPath, buffer);
+
+    const args = ["--stdout", "--no-summary", ...CLAMAV_ARGS, tempPath];
+    const { stdout } = await execFileAsync(CLAMAV_COMMAND, args, {
+      timeout: CLAMAV_TIMEOUT_MS,
+    });
+
+    if (stdout && /FOUND/i.test(stdout)) {
+      throw new Error("Virus detected in uploaded file");
+    }
+
+    return true;
+  } catch (error) {
+    if (error && error.code === 1) {
+      throw new Error("Virus detected in uploaded file");
+    }
+
+    if (error && error.code === "ENOENT") {
+      const msg = `ClamAV command not found: ${CLAMAV_COMMAND}`;
+      if (CLAMAV_REQUIRED) {
+        throw new Error(msg);
+      }
+      logger.warn({ message: msg });
+      return true;
+    }
+
+    if (error && error.code === 2) {
+      const msg = `ClamAV scan error: ${error.message || "unknown error"}`;
+      if (CLAMAV_REQUIRED) {
+        throw new Error(msg);
+      }
+      logger.warn({ message: msg });
+      return true;
+    }
+
+    if (CLAMAV_REQUIRED) {
+      throw new Error("Virus scan failed");
+    }
+
+    logger.warn({ message: "Virus scan failed, allowing file", error: error?.message });
+    return true;
+  } finally {
+    await fs.unlink(tempPath).catch(() => undefined);
+  }
 };
 
 // Configure multer with memory storage

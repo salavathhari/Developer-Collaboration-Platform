@@ -4,6 +4,7 @@ const PullRequest = require("../models/PullRequest");
 const File = require("../models/File");
 const Notification = require("../models/Notification");
 const { logActivity } = require("../utils/activity");
+const notificationService = require("./notificationService");
 
 /**
  * Business logic layer for task management
@@ -74,8 +75,16 @@ class TaskService {
       { path: "linkedIssueId", select: "title status" },
     ]);
 
-    // Create notifications for assignees
-    await this._notifyAssignees(task, user.id, "assigned");
+    // Notify assignees using notification service
+    if (assignees && assignees.length > 0) {
+      await notificationService.notifyTaskAssigned({
+        taskId: task._id,
+        taskTitle: task.title,
+        assigneeIds: assignees,
+        assignedBy: user.id,
+        projectId,
+      });
+    }
 
     // Log activity
     logActivity(projectId, user.id, "created_task", `Created task: ${title}`);
@@ -135,18 +144,15 @@ class TaskService {
         task.addActivity(user.id, "assigned", { added, removed });
         changedFields.push("assignees");
 
-        // Notify new assignees
-        for (const assigneeId of added) {
-          if (assigneeId !== user.id.toString()) {
-            await Notification.create({
-              userId: assigneeId,
-              type: "task_assigned",
-              message: `You were assigned to task: ${task.title}`,
-              referenceId: task._id,
-              projectId: task.projectId,
-              payload: { taskTitle: task.title },
-            });
-          }
+        // Notify new assignees using notification service
+        if (added.length > 0) {
+          await notificationService.notifyTaskAssigned({
+            taskId: task._id,
+            taskTitle: task.title,
+            assigneeIds: added,
+            assignedBy: user.id,
+            projectId: task.projectId,
+          });
         }
       }
     }
@@ -414,9 +420,19 @@ class TaskService {
       { path: "assignees", select: "username email avatar" },
     ]);
 
-    // Notify assignees (except commenter)
-    await this._notifyAssignees(task, user.id, "comment_added", {
-      commenterName: user.name || user.username,
+    // Notify watchers (assignees + creator) using notification service
+    const watchers = [
+      ...task.assignees.map((a) => (typeof a === "object" ? a._id : a)),
+      task.createdBy,
+    ];
+
+    await notificationService.notifyTaskComment({
+      taskId: task._id,
+      taskTitle: task.title,
+      commenterId: user.id,
+      comment: text.substring(0, 100),
+      projectId: task.projectId,
+      watchers,
     });
 
     return task;
@@ -425,6 +441,8 @@ class TaskService {
   // Private helper methods
 
   async _notifyAssignees(task, actorId, notificationType, extraPayload = {}) {
+    // This method is being replaced by notification service calls
+    // Kept for backward compatibility, but use notificationService instead
     const assigneeIds = task.assignees.map((a) =>
       typeof a === "object" ? a._id.toString() : a.toString()
     );
@@ -463,24 +481,20 @@ class TaskService {
         `Completed task: ${task.title}`
       );
 
-      // Notify all stakeholders
-      const notifyUsers = new Set([
-        ...task.assignees.map((a) => a._id.toString()),
-        task.createdBy.toString(),
-      ]);
+      // Notify all stakeholders using notification service
+      const watchers = [
+        ...task.assignees.map((a) => (typeof a === "object" ? a._id : a)),
+        task.createdBy,
+      ];
 
-      notifyUsers.delete(user.id.toString());
-
-      for (const userId of notifyUsers) {
-        await Notification.create({
-          userId,
-          type: "task_completed",
-          message: `Task completed: ${task.title}`,
-          referenceId: task._id,
-          projectId: task.projectId,
-          payload: { taskTitle: task.title },
-        });
-      }
+      await notificationService.notifyTaskStatusChanged({
+        taskId: task._id,
+        taskTitle: task.title,
+        newStatus: "done",
+        changedBy: user.id,
+        projectId: task.projectId,
+        watchers,
+      });
     } else if (newStatus === "review" && task.linkedPRId) {
       // Notify PR reviewers
       const pr = await PullRequest.findById(task.linkedPRId);

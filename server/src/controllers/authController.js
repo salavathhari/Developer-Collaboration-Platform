@@ -238,13 +238,16 @@ const login = async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Check if email is verified (optional - you can allow unverified login with warning)
+    // Check if email is verified (DISABLED FOR DEVELOPMENT)
+    // UNCOMMENT THE BELOW CODE WHEN DEPLOYING TO PRODUCTION
+    /*
     if (!user.isVerified) {
       return res.status(403).json({
         error: "Email not verified",
         message: "Please verify your email before logging in. Check your inbox for the verification link.",
       });
     }
+    */
 
     // Generate tokens
     const accessToken = generateAccessToken(user._id);
